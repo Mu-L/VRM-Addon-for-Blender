@@ -1,5 +1,6 @@
 from collections.abc import Set as AbstractSet
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 
 import bpy
@@ -41,9 +42,10 @@ from ..editor.vrm1.panel import (
     draw_vrm1_humanoid_required_bones_layout,
 )
 from ..editor.vrm1.property_group import Vrm1HumanBonesPropertyGroup
-from .abstract_base_vrm_exporter import AbstractBaseVrmExporter
-from .vrm0_exporter import Vrm0Exporter
-from .vrm1_exporter import Vrm1Exporter
+from .exporter_process import (
+    ExportConfig,
+    run_vrm_export_process_and_show_result_if_error,
+)
 from .vrm_animation_exporter import VrmAnimationExporter
 
 logger = get_logger(__name__)
@@ -123,54 +125,29 @@ class EXPORT_SCENE_OT_vrm(Operator, ExportHelper):
         if not self.filepath:
             return {"CANCELLED"}
 
-        if self.use_addon_preferences:
-            copy_export_preferences(source=get_preferences(context), destination=self)
-
-        if ops.vrm.model_validate(
-            "INVOKE_DEFAULT",
-            show_successful_message=False,
-            armature_object_name=self.armature_object_name,
-        ) != {"FINISHED"}:
-            return {"CANCELLED"}
-
-        if self.enable_advanced_preferences:
-            export_fb_ngon_encoding = self.export_fb_ngon_encoding
-        else:
-            export_fb_ngon_encoding = False
-
-        export_objects = search.export_objects(
-            context,
-            self.armature_object_name,
-            export_invisibles=self.export_invisibles,
-            export_only_selections=self.export_only_selections,
-            export_lights=self.export_lights,
-        )
-        is_vrm1 = any(
-            obj.type == "ARMATURE"
-            and isinstance(obj.data, Armature)
-            and get_armature_extension(obj.data).is_vrm1()
-            for obj in export_objects
-        )
-
-        if is_vrm1:
-            vrm_exporter: AbstractBaseVrmExporter = Vrm1Exporter(
-                context,
-                export_objects,
-                export_all_influences=self.export_all_influences,
-                export_lights=self.export_lights,
-            )
-        else:
-            vrm_exporter = Vrm0Exporter(
-                context,
-                export_objects,
-                export_fb_ngon_encoding=export_fb_ngon_encoding,
+        with TemporaryDirectory() as temp_dir:
+            blend_path = Path(temp_dir) / "temp_vrm_export.blend"
+            export_config = ExportConfig(
+                blend_path=str(blend_path),
+                result_path=self.filepath,
+                armature_object_name=self.armature_object_name,
             )
 
-        vrm_bin = vrm_exporter.export_vrm()
-        if vrm_bin is None:
-            return {"CANCELLED"}
-        Path(self.filepath).write_bytes(vrm_bin)
-        return {"FINISHED"}
+            if self.use_addon_preferences:
+                copy_export_preferences(
+                    source=get_preferences(context),
+                    destination=export_config,
+                )
+            else:
+                copy_export_preferences(
+                    source=self,
+                    destination=export_config,
+                )
+
+            config_path = Path(temp_dir) / "config.json"
+            return run_vrm_export_process_and_show_result_if_error(
+                export_config, config_path
+            )
 
     def invoke(self, context: Context, event: Event) -> set[str]:
         self.use_addon_preferences = True
