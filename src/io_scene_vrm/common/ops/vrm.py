@@ -191,26 +191,6 @@ def add_vrm_humanbone_custom_property(
 
 # This code is auto generated.
 # To regenerate, run the `uv run tools/property_typing.py` command.
-def model_draw_remove(
-    execution_context: str = "EXEC_DEFAULT",
-) -> set[str]:
-    return bpy.ops.vrm.model_draw_remove(  # type: ignore[attr-defined, no-any-return]
-        execution_context,
-    )
-
-
-# This code is auto generated.
-# To regenerate, run the `uv run tools/property_typing.py` command.
-def model_draw(
-    execution_context: str = "EXEC_DEFAULT",
-) -> set[str]:
-    return bpy.ops.vrm.model_draw(  # type: ignore[attr-defined, no-any-return]
-        execution_context,
-    )
-
-
-# This code is auto generated.
-# To regenerate, run the `uv run tools/property_typing.py` command.
 def show_material_blender_4_2_warning(
     execution_context: str = "EXEC_DEFAULT",
     /,
