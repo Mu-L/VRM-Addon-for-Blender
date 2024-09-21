@@ -8,7 +8,6 @@ from sys import float_info
 from typing import Optional, Union
 from urllib.parse import urlparse
 
-import bpy
 from bpy.types import Armature, Context, Object
 from mathutils import Matrix, Quaternion, Vector
 
@@ -29,6 +28,7 @@ from ..common.logging import get_logger
 from ..common.vrm1.human_bone import HumanBoneName
 from ..common.workspace import save_workspace
 from ..editor.extension import get_armature_extension
+from ..editor.t_pose import setup_humanoid_t_pose
 
 logger = get_logger(__name__)
 
@@ -110,7 +110,20 @@ class NodeRestPoseTree:
 class VrmAnimationImporter:
     @staticmethod
     def execute(context: Context, path: Path, armature: Object) -> set[str]:
-        return work_in_progress(context, path, armature)
+        armature_data = armature.data
+        if not isinstance(armature_data, Armature):
+            return {"CANCELLED"}
+
+        humanoid = get_armature_extension(armature_data).vrm1.humanoid
+        if not humanoid.human_bones.all_required_bones_are_assigned():
+            return {"CANCELLED"}
+
+        # TODO: 現状restがTポーズの時しか正常動作しない
+        with (
+            save_workspace(context, armature, mode="POSE"),
+            setup_humanoid_t_pose(context, armature),
+        ):
+            return work_in_progress(context, path, armature)
 
 
 def find_root_node_index(
@@ -306,57 +319,6 @@ def read_accessor_as_animation_sampler_rotation_output(
 
 
 def work_in_progress(context: Context, path: Path, armature: Object) -> set[str]:
-    armature_data = armature.data
-    if not isinstance(armature_data, Armature):
-        return {"CANCELLED"}
-    humanoid = get_armature_extension(armature_data).vrm1.humanoid
-    if not humanoid.human_bones.all_required_bones_are_assigned():
-        return {"CANCELLED"}
-
-    saved_pose_position = armature_data.pose_position
-    vrm1 = get_armature_extension(armature_data).vrm1
-
-    # TODO: 現状restがTポーズの時しか動作しない
-    # TODO: 自動でTポーズを作成する
-    # TODO: Tポーズ取得処理、共通化
-    with save_workspace(context, armature):
-        try:
-            bpy.ops.object.select_all(action="DESELECT")
-            bpy.ops.object.mode_set(mode="POSE")
-
-            armature_data.pose_position = "POSE"
-
-            t_pose_action = vrm1.humanoid.pose_library
-            t_pose_pose_marker_name = vrm1.humanoid.pose_marker_name
-            pose_marker_frame = 0
-            if t_pose_action and t_pose_pose_marker_name:
-                for search_pose_marker in t_pose_action.pose_markers.values():
-                    if search_pose_marker.name == t_pose_pose_marker_name:
-                        pose_marker_frame = search_pose_marker.frame
-                        break
-
-            context.view_layer.update()
-
-            if t_pose_action:
-                armature.pose.apply_pose_from_action(
-                    t_pose_action, evaluation_time=pose_marker_frame
-                )
-            else:
-                for bone in armature.pose.bones:
-                    bone.location = Vector((0, 0, 0))
-                    bone.scale = Vector((1, 1, 1))
-                    if bone.rotation_mode != "QUATERNION":
-                        bone.rotation_mode = "QUATERNION"
-                    bone.rotation_quaternion = Quaternion()
-
-            context.view_layer.update()
-
-            return work_in_progress_2(context, path, armature)
-        finally:
-            armature_data.pose_position = saved_pose_position
-
-
-def work_in_progress_2(context: Context, path: Path, armature: Object) -> set[str]:
     if not path.exists():
         return {"CANCELLED"}
     armature_data = armature.data
