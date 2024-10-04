@@ -107,6 +107,19 @@ class Vrm0Exporter(AbstractBaseVrmExporter):
     ) -> None:
         super().__init__(context)
         self.export_objects = export_objects
+
+    def export_vrm(self) -> Optional[bytes]:
+        return None
+
+
+class Vrm0LegacyExporter(AbstractBaseVrmExporter):
+    def __init__(
+        self,
+        context: Context,
+        export_objects: list[Object],
+    ) -> None:
+        super().__init__(context)
+        self.export_objects = export_objects
         self.json_dict: dict[str, Json] = {}
         self.glb_bin_collector = GlbBinCollection()
         self.mesh_name_to_index: dict[str, int] = {}
@@ -187,7 +200,7 @@ class Vrm0Exporter(AbstractBaseVrmExporter):
             with save_workspace(self.context, self.armature):
                 yield
         finally:
-            if use_dummy_armature:
+            if use_dummy_armature and self.armature.users <= 1:
                 self.context.blend_data.objects.remove(self.armature, do_unlink=True)
 
     @contextmanager
