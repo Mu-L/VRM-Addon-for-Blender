@@ -1,3 +1,4 @@
+import math
 from collections.abc import Iterator, Mapping, Sequence
 from sys import float_info
 from typing import Optional, Union
@@ -254,3 +255,21 @@ def str_or(v: object, default: str) -> str:
     if isinstance(v, str):
         return v
     return default
+
+
+def linear_to_srgb(
+    non_color: Sequence[float],
+) -> Sequence[float]:
+    return [
+        math.pow(channel_value, 1.0 / 2.2) if channel_index < 3 else channel_value
+        for channel_index, channel_value in enumerate(non_color)
+    ]
+
+
+def srgb_to_linear(
+    srgb_color: Sequence[float],
+) -> Sequence[float]:
+    return [
+        math.pow(channel_value, 2.2) if channel_index < 3 else channel_value
+        for channel_index, channel_value in enumerate(srgb_color)
+    ]

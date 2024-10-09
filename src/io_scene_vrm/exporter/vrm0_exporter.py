@@ -1571,9 +1571,16 @@ class Vrm0Exporter(AbstractBaseVrmExporter):
         extensions = gltf.pbr_metallic_roughness.base_color_texture.extensions
         khr_texture_transform = extensions.khr_texture_transform
 
-        vector_properties["_Color"] = list(
-            gltf.pbr_metallic_roughness.base_color_factor
-        )
+        vector_properties["_Color"] = [
+            *convert.srgb_to_linear(
+                (
+                    gltf.pbr_metallic_roughness.base_color_factor[0],
+                    gltf.pbr_metallic_roughness.base_color_factor[1],
+                    gltf.pbr_metallic_roughness.base_color_factor[2],
+                )
+            ),
+            gltf.pbr_metallic_roughness.base_color_factor[3],
+        ]
 
         if assign_dict(
             pbr_metallic_roughness_dict,
@@ -1596,7 +1603,9 @@ class Vrm0Exporter(AbstractBaseVrmExporter):
                 khr_texture_transform.scale[1],
             ]
 
-        vector_properties["_ShadeColor"] = [*mtoon.shade_color_factor, 1]
+        vector_properties["_ShadeColor"] = convert.srgb_to_linear(
+            mtoon.shade_color_factor
+        )
         self.add_mtoon1_downgraded_texture_info(
             mtoon.shade_multiply_texture,
             texture_properties,
