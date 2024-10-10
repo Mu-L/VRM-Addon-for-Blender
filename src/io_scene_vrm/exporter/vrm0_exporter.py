@@ -54,7 +54,7 @@ from ..common.gltf import (
 from ..common.legacy_gltf import TEXTURE_INPUT_NAMES
 from ..common.logging import get_logger
 from ..common.mtoon_unversioned import MtoonUnversioned
-from ..common.progress import PartialProgress, create_progress
+from ..common.progress import PartialProgress, create_progress, Progress
 from ..common.version import get_addon_version
 from ..common.vrm0.human_bone import HumanBoneSpecifications
 from ..common.workspace import save_workspace
@@ -123,11 +123,14 @@ class Vrm0Exporter(AbstractBaseVrmExporter):
             self.clear_blend_shape_proxy_previews(armature_data),
             setup_humanoid_t_pose(self.context, self.armature),
             self.hide_mtoon1_outline_geometry_nodes(self.context),
-            create_progress(self.context) as _progress,
+            create_progress(self.context) as progress,
         ):
-            json_dict: dict[str, Json] = {}
-            buffer0 = bytearray()
-            return gltf.pack_glb(json_dict, buffer0)
+            return self.__export_vrm(progress)
+
+    def __export_vrm(self, _progress: Progress) -> Optional[bytes]:
+        json_dict: dict[str, Json] = {}
+        buffer0 = bytearray()
+        return gltf.pack_glb(json_dict, buffer0)
 
     @property
     def armature_data(self) -> Armature:
