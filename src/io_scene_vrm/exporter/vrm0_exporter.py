@@ -112,7 +112,7 @@ class Vrm0Exporter(AbstractBaseVrmExporter):
         self.mesh_name_to_index: dict[str, int] = {}
         self.result: Optional[bytes] = None
 
-    def export_vrm2(self) -> Optional[bytes]:
+    def export_vrm(self) -> Optional[bytes]:
         armature_data = self.armature.data
         if not isinstance(armature_data, Armature):
             message = f"{type(armature_data)} is not an Armature"
@@ -123,6 +123,7 @@ class Vrm0Exporter(AbstractBaseVrmExporter):
             self.clear_blend_shape_proxy_previews(armature_data),
             setup_humanoid_t_pose(self.context, self.armature),
             self.hide_mtoon1_outline_geometry_nodes(self.context),
+            create_progress(self.context) as _progress,
         ):
             json_dict: dict[str, Json] = {}
             buffer0 = bytearray()
@@ -139,7 +140,7 @@ class Vrm0Exporter(AbstractBaseVrmExporter):
             raise TypeError(message)
         return armature_data
 
-    def export_vrm(self) -> Optional[bytes]:
+    def export_vrm2(self) -> Optional[bytes]:
         with (
             create_progress(self.context) as progress,
             save_workspace(self.context),
