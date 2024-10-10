@@ -131,15 +131,25 @@ class Vrm0Exporter(AbstractBaseVrmExporter):
             return gltf.pack_glb(json_dict, buffer0)
 
     def write_glb_structure(
-        self, _progress: Progress, json_dict: dict[str, Json], buffer0: bytearray
+        self, progress: Progress, json_dict: dict[str, Json], buffer0: bytearray
     ) -> None:
         json_dict["asset"] = {"generator": self.get_asset_generator(), "version": "2.0"}
-        self.write_scene(_progress, json_dict, buffer0)
+        self.write_scene(progress, json_dict, buffer0)
+        self.write_vrm_extension(progress, json_dict, buffer0)
         json_dict["buffers"] = [
             {
                 "byteLength": len(buffer0),
             }
         ]
+
+    def write_vrm_extension(
+        self, _progress: Progress, json_dict: dict[str, Json], _buffer0: bytearray
+    ) -> None:
+        vrm_dict: dict[str, Json] = {}
+        json_dict["extensionsUsed"] = ["VRM"]
+        json_dict["extensions"] = {
+            "VRM": vrm_dict,
+        }
 
     def write_scene(
         self, progress: Progress, json_dict: dict[str, Json], buffer0: bytearray
@@ -157,9 +167,14 @@ class Vrm0Exporter(AbstractBaseVrmExporter):
                 progress, json_dict, node_dicts, buffer0, _parent_object_name=None
             )
         )
-        scene0_nodes.append(
-            self.write_secondary_nodes(progress, json_dict, node_dicts, buffer0)
-        )
+        if not any(
+            node_dict.get("name") == "secondary"
+            for node_dict in node_dicts
+            if isinstance(node_dict, dict)
+        ):
+            scene0_nodes.append(
+                self.write_secondary_nodes(progress, json_dict, node_dicts, buffer0)
+            )
         json_dict["scenes"] = [{"nodes": scene0_nodes}]
         json_dict["scene"] = 0
 
