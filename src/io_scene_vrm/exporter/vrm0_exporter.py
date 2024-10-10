@@ -54,7 +54,7 @@ from ..common.gltf import (
 from ..common.legacy_gltf import TEXTURE_INPUT_NAMES
 from ..common.logging import get_logger
 from ..common.mtoon_unversioned import MtoonUnversioned
-from ..common.progress import PartialProgress, create_progress, Progress
+from ..common.progress import PartialProgress, Progress, create_progress
 from ..common.version import get_addon_version
 from ..common.vrm0.human_bone import HumanBoneSpecifications
 from ..common.workspace import save_workspace
@@ -125,12 +125,136 @@ class Vrm0Exporter(AbstractBaseVrmExporter):
             self.hide_mtoon1_outline_geometry_nodes(self.context),
             create_progress(self.context) as progress,
         ):
-            return self.__export_vrm(progress)
+            json_dict: dict[str, Json] = {}
+            buffer0 = bytearray()
+            self.write_glb_structure(progress, json_dict, buffer0)
+            return gltf.pack_glb(json_dict, buffer0)
 
-    def __export_vrm(self, _progress: Progress) -> Optional[bytes]:
-        json_dict: dict[str, Json] = {}
-        buffer0 = bytearray()
-        return gltf.pack_glb(json_dict, buffer0)
+    def write_glb_structure(
+        self, _progress: Progress, json_dict: dict[str, Json], buffer0: bytearray
+    ) -> None:
+        json_dict["asset"] = {"generator": self.get_asset_generator(), "version": "2.0"}
+        self.write_scene(_progress, json_dict, buffer0)
+        json_dict["buffers"] = [
+            {
+                "byteLength": len(buffer0),
+            }
+        ]
+
+    def write_scene(
+        self, progress: Progress, json_dict: dict[str, Json], buffer0: bytearray
+    ) -> None:
+        scene0_nodes: list[Json] = []
+        node_dicts = json_dict.get("nodes")
+        if not isinstance(node_dicts, list):
+            node_dicts = []
+            json_dict["nodes"] = node_dicts
+        scene0_nodes.append(
+            self.write_armature(progress, json_dict, node_dicts, buffer0)
+        )
+        scene0_nodes.extend(
+            self.write_mesh_nodes(
+                progress, json_dict, node_dicts, buffer0, _parent_object_name=None
+            )
+        )
+        scene0_nodes.append(
+            self.write_secondary_nodes(progress, json_dict, node_dicts, buffer0)
+        )
+        json_dict["scenes"] = [{"nodes": scene0_nodes}]
+        json_dict["scene"] = 0
+
+    def write_armature(
+        self,
+        progress: Progress,
+        json_dict: dict[str, Json],
+        node_dicts: list[Json],
+        buffer0: bytearray,
+    ) -> int:
+        root_node_index = len(node_dicts)
+        bones = [bone for bone in self.armature.pose.bones if not bone.parent]
+        if not bones:
+            node_dicts.append(
+                {
+                    "name": self.armature.name,
+                }
+            )
+        elif len(bones) == 1:
+            return self.write_armature_bone_nodes(
+                progress, json_dict, node_dicts, buffer0, bones[0]
+            )
+        elif len(bones) > 1:
+            # ルートボーンか複数ある場合は、それらをまとめるノードを作成する
+            # TODO: たぶんskinの仕様だったと思うけど自信が無い
+            # TODO: armatureのtransformをここに適用してしまうと良い
+            node_dict: dict[str, Json] = {
+                "name": self.armature.name,
+            }
+            node_dicts.append(node_dict)
+            node_dict["children"] = [
+                self.write_armature_bone_nodes(
+                    progress, json_dict, node_dicts, buffer0, bone
+                )
+                for bone in bones
+            ]
+        return root_node_index
+
+    def write_armature_bone_nodes(
+        self,
+        progress: Progress,
+        json_dict: dict[str, Json],
+        node_dicts: list[Json],
+        buffer0: bytearray,
+        bone: PoseBone,
+    ) -> int:
+        root_node_index = len(node_dicts)
+
+        parent_bone = bone.parent
+        if parent_bone is not None:
+            translation = self.armature.matrix_world @ (bone.head - parent_bone.head)
+        else:
+            translation = self.armature.matrix_world @ bone.head
+        node_dict: dict[str, Json] = {
+            "name": bone.name,
+            "translation": make_json(convert.axis_blender_to_gltf(translation)),
+        }
+        node_dicts.append(node_dict)
+        if bone.children:
+            node_dict["children"] = [
+                self.write_armature_bone_nodes(
+                    progress, json_dict, node_dicts, buffer0, child
+                )
+                for child in bone.children
+            ]
+        return root_node_index
+
+    def write_mesh_nodes(
+        self,
+        _progress: Progress,
+        _json_dict: dict[str, Json],
+        _node_dicts: list[Json],
+        _buffer0: bytearray,
+        *,
+        _parent_object_name: Optional[str],
+    ) -> list[int]:
+        return []
+
+    def write_secondary_nodes(
+        self,
+        _progress: Progress,
+        _json_dict: dict[str, Json],
+        node_dicts: list[Json],
+        _buffer0: bytearray,
+    ) -> int:
+        node_index = len(node_dicts)
+        node_dicts.append(
+            {
+                "name": "secondary",
+                "translation": [0.0, 0.0, 0.0],
+                "rotation": [0.0, 0.0, 0.0, 1.0],
+                "scale": [1.0, 1.0, 1.0],
+            }
+        )
+        return node_index
 
     @property
     def armature_data(self) -> Armature:
@@ -2774,11 +2898,13 @@ class Vrm0Exporter(AbstractBaseVrmExporter):
             progress.update(float(mesh_index) / len(meshes))
         progress.update(1)
 
-    def exporter_name(self) -> str:
-        v = get_addon_version()
+    def get_asset_generator(self) -> str:
+        addon_version = get_addon_version()
         if environ.get("BLENDER_VRM_USE_TEST_EXPORTER_VERSION") == "true":
-            v = (999, 999, 999)
-        return "saturday06_blender_vrm_exporter_experimental_" + ".".join(map(str, v))
+            addon_version = (999, 999, 999)
+        return "saturday06_blender_vrm_exporter_experimental_" + ".".join(
+            map(str, addon_version)
+        )
 
     def gltf_meta_to_dict(self) -> None:
         extensions_used: list[str] = []
@@ -2818,7 +2944,7 @@ class Vrm0Exporter(AbstractBaseVrmExporter):
         gltf_meta_dict: dict[str, Json] = {
             "extensionsUsed": make_json(extensions_used),
             "asset": {
-                "generator": self.exporter_name(),
+                "generator": self.get_asset_generator(),
                 "version": "2.0",  # glTF version
             },
         }
@@ -2840,7 +2966,7 @@ class Vrm0Exporter(AbstractBaseVrmExporter):
         # vrm extension
         meta = get_armature_extension(self.armature_data).vrm0.meta
         vrm_extension_dict: dict[str, Json] = {
-            "exporterVersion": self.exporter_name(),
+            "exporterVersion": self.get_asset_generator(),
             "specVersion": "0.0",
         }
 
