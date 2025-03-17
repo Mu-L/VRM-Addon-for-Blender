@@ -17,8 +17,8 @@ bl_info = {
     "author": "saturday06, iCyP",
     "version": (
         2,  # x-release-please-major
-        34,  # x-release-please-minor
-        1,  # x-release-please-patch
+        35,  # x-release-please-minor
+        0,  # x-release-please-patch
     ),
     "location": "File > Import-Export",
     "description": "Import-Edit-Export VRM",
@@ -31,7 +31,7 @@ bl_info = {
     "category": "Import-Export",
 }
 
-MINIMUM_UNSUPPORTED_BLENDER_MAJOR_MINOR_VERSION = (4, 4)
+MINIMUM_UNSUPPORTED_BLENDER_MAJOR_MINOR_VERSION = (4, 5)
 
 
 def cleanse_modules() -> None:
