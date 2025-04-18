@@ -11,14 +11,13 @@
 #
 #
 
-# Synchronize with https://github.com/saturday06/VRM-Addon-for-Blender/blob/2_20_49/src/io_scene_vrm/common/version.py#L94-L102
 bl_info = {
     "name": "VRM format",
     "author": "saturday06, iCyP",
     "version": (
         3,  # x-release-please-major
         0,  # x-release-please-minor
-        0,  # x-release-please-patch
+        1,  # x-release-please-patch
     ),
     "location": "File > Import-Export",
     "description": "Import-Edit-Export VRM",
@@ -97,8 +96,8 @@ def raise_error_if_too_old_blender() -> None:
 
     raise_not_implemented_error(
         default_message=(
-            "This add-on doesn't support Blender version less than"
-            + " {minimum_supported_version} but the current version is"
+            "This add-on doesn't support Blender versions earlier than"
+            + " {minimum_supported_version}. Your current version is"
             + " {current_version}"
         ),
         ja_jp_message=(
@@ -117,8 +116,8 @@ def raise_error_if_too_new_blender(exception: object) -> None:
     raise_not_implemented_error(
         exception=exception,
         default_message=(
-            "This add-on is not compatible with Blender versions"
-            + " {minimum_unsupported_version} or higher. The current version is"
+            "This add-on is not compatible with Blender version"
+            + " {minimum_unsupported_version} or higher. Your current version is"
             + " {current_version}"
         ),
         ja_jp_message=(
@@ -205,8 +204,8 @@ def extract_github_private_partial_code_archive_if_necessary() -> None:
 
     logger.warning(
         "%s Extracting the partial add-on archive for "
-        "users who have acquired the add-on "
-        'from "Code" -> "Download ZIP" on GitHub ...',
+        "users who downloaded the add-on "
+        'using the "Code" -> "Download ZIP" link on GitHub...',
         log_warning_prefix,
     )
 
