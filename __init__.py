@@ -3,10 +3,10 @@
 
 #
 #
-# - Please don't import anything in the global scope to minimize initialization and
-#   support unzipping the partial add-on archive for users who have acquired the add-on
+# - Please avoid importing anything in the global scope to minimize initialization and
+#   support unzipping the partial add-on archive for users who downloaded the add-on
 #   from "Code" -> "Download ZIP" on GitHub.
-# - Please write this script to work with Blender 2.79.
+# - Ensure this script works with Blender 2.79.
 #   ruff: noqa: UP032
 #
 #
@@ -16,8 +16,8 @@ bl_info = {
     "author": "saturday06, iCyP",
     "version": (
         3,  # x-release-please-major
-        0,  # x-release-please-minor
-        1,  # x-release-please-patch
+        1,  # x-release-please-minor
+        0,  # x-release-please-patch
     ),
     "location": "File > Import-Export",
     "description": "Import-Edit-Export VRM",
@@ -96,9 +96,8 @@ def raise_error_if_too_old_blender() -> None:
 
     raise_not_implemented_error(
         default_message=(
-            "This add-on doesn't support Blender versions earlier than"
-            + " {minimum_supported_version}. Your current version is"
-            + " {current_version}"
+            "This add-on requires Blender version {minimum_supported_version} or later."
+            + " Your current version is {current_version}."
         ),
         ja_jp_message=(
             "このアドオンはBlenderのバージョン{minimum_supported_version}未満には未対応です。"
@@ -117,8 +116,8 @@ def raise_error_if_too_new_blender(exception: object) -> None:
         exception=exception,
         default_message=(
             "This add-on is not compatible with Blender version"
-            + " {minimum_unsupported_version} or higher. Your current version is"
-            + " {current_version}"
+            + " {minimum_unsupported_version} or later. Your current version is"
+            + " {current_version}."
         ),
         ja_jp_message=(
             "このアドオンはBlenderのバージョン{minimum_unsupported_version}以降には未対応です。"
@@ -160,7 +159,7 @@ def raise_not_implemented_error(
     )
     if exception is not None:
         highlighted_message = (
-            "            Original Exception={exception_name}: {exception}".format(
+            "            Original Exception: {exception_name}: {exception}".format(
                 exception=exception,
                 exception_name=type(exception).__name__,
             )
@@ -205,7 +204,7 @@ def extract_github_private_partial_code_archive_if_necessary() -> None:
     logger.warning(
         "%s Extracting the partial add-on archive for "
         "users who downloaded the add-on "
-        'using the "Code" -> "Download ZIP" link on GitHub...',
+        'using the "Code" > "Download ZIP" link on GitHub...',
         log_warning_prefix,
     )
 
@@ -235,7 +234,7 @@ def extract_github_private_partial_code_archive_if_necessary() -> None:
         github_private_partial_code_archive_path.unlink()
     except OSError:
         logger.exception(
-            "%s Failed to remove the partial add-on archive: %s",
+            "%s Unable to remove the partial add-on archive: %s",
             log_exception_prefix,
             github_private_partial_code_archive_path,
         )
