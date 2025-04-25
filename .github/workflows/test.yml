@@ -1,0 +1,266 @@
+# SPDX-License-Identifier: MIT OR GPL-3.0-or-later
+name: test
+
+permissions: {}
+
+on:
+  push:
+    branches-ignore:
+      - README
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches-ignore:
+      - README
+  workflow_dispatch:
+
+env:
+  BLENDER_ARCHIVE_BASE_URL: https://download.blender.org/release
+
+jobs:
+  test-windows:
+    runs-on: windows-2025
+    strategy:
+      fail-fast: false
+      matrix:
+        blender_major_minor_version:
+          - 2.93
+          - 3.3
+          - 3.6
+          - 4.2
+    env:
+      BLENDER_VRM_EXCLUDE_GUI_TEST: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache archive
+        id: cache-archive
+        uses: actions/cache@v4
+        with:
+          path: blender.zip
+          key: ${{ matrix.blender_major_minor_version }}-archive-5
+      - name: Download archive
+        if: steps.cache-archive.outputs.cache-hit != 'true'
+        env:
+          BLENDER_MAJOR_MINOR_VERSION: ${{ matrix.blender_major_minor_version }}
+        run: |
+          $url = "${env:BLENDER_ARCHIVE_BASE_URL}/Blender${env:BLENDER_MAJOR_MINOR_VERSION}/blender-${env:BLENDER_MAJOR_MINOR_VERSION}.0-windows-x64.zip"
+          $retry = 10
+          for (; $true; $retry--) {
+            try {
+              Start-BitsTransfer blender.zip -Source "$url"
+              break
+            } catch {
+              if ($retry -le 0) {
+                throw $_.Exception
+              }
+            }
+            Start-Sleep -Seconds 60
+          }
+      - name: Test
+        run: |
+          Expand-Archive -LiteralPath blender.zip -DestinationPath "$env:TEMP\blender"
+          $env:BLENDER_VRM_TEST_BLENDER_PATH = (Get-ChildItem "$env:TEMP\blender\*\blender.exe")[0].FullName
+          & "$env:BLENDER_VRM_TEST_BLENDER_PATH" --background -noaudio --python-exit-code 1 --python tools\generate_dynamic_tests.py
+          & "$env:BLENDER_VRM_TEST_BLENDER_PATH" --background -noaudio --python-exit-code 1 --python tools\unittest_discover.py
+      - name: Archive failed io test result
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: VRMs (${{ github.job }}#${{ strategy.job-index }})
+          path: tests/resources/vrm/*/temp
+
+  test-macos:
+    runs-on: macos-14
+    strategy:
+      fail-fast: false
+      matrix:
+        blender_major_minor_version:
+          - 2.93
+          - 3.3
+          - 3.6
+          - 4.2
+        blender_arch:
+          - arm64
+        include:
+          - blender_major_minor_version: 4.2
+            blender_arch: x64
+    env:
+      BLENDER_VRM_EXCLUDE_GUI_TEST: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache archive
+        id: cache-archive
+        uses: actions/cache@v4
+        with:
+          path: blender.dmg
+          key: ${{ matrix.blender_major_minor_version }}-${{ matrix.blender_arch }}-archive-5
+      - name: Download archive
+        if: steps.cache-archive.outputs.cache-hit != 'true'
+        env:
+          BLENDER_MAJOR_MINOR_VERSION: ${{ matrix.blender_major_minor_version }}
+          BLENDER_ARCH: ${{ matrix.blender_arch }}
+        run: |
+          url="${BLENDER_ARCHIVE_BASE_URL}/Blender${BLENDER_MAJOR_MINOR_VERSION}/blender-${BLENDER_MAJOR_MINOR_VERSION}.0-macos-${BLENDER_ARCH}.dmg"
+          curl -fsLS --retry 5 --retry-all-errors "$url" -o blender.dmg
+      - name: Test
+        run: |
+          hdiutil attach blender.dmg
+          cp -fr /Volumes/Blender/Blender.app /Applications
+          /Applications/Blender.app/Contents/MacOS/blender --background -noaudio --python-exit-code 1 --python tools/generate_dynamic_tests.py
+          /Applications/Blender.app/Contents/MacOS/blender --background -noaudio --python-exit-code 1 --python tools/unittest_discover.py
+      - name: Archive failed io test result
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: VRMs (${{ github.job }}#${{ strategy.job-index }})
+          path: tests/resources/vrm/*/temp
+
+  test-linux:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        blender_major_minor_version:
+          - 4.2
+    env:
+      BLENDER_VRM_EXCLUDE_GUI_TEST: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache archive
+        id: cache-archive
+        uses: actions/cache@v4
+        with:
+          path: blender.tar.gz
+          key: ${{ matrix.blender_major_minor_version }}-archive-6
+      - name: Download archive
+        if: steps.cache-archive.outputs.cache-hit != 'true'
+        env:
+          BLENDER_MAJOR_MINOR_VERSION: ${{ matrix.blender_major_minor_version }}
+        run: |
+          url="${BLENDER_ARCHIVE_BASE_URL}/Blender${BLENDER_MAJOR_MINOR_VERSION}/blender-${BLENDER_MAJOR_MINOR_VERSION}.0-linux-x64.tar.xz"
+          curl -fsLS --retry 5 --retry-all-errors "$url" -o blender.tar.xz
+      - name: Test
+        run: |
+          mkdir -p "$HOME/.local/blender"
+          tar -x --strip-components=1 -f blender.tar.xz -C "$HOME/.local/blender"
+          "$HOME/.local/blender/blender" --background -noaudio --python-exit-code 1 --python tools/generate_dynamic_tests.py
+          "$HOME/.local/blender/blender" --background -noaudio --python-exit-code 1 --python tools/unittest_discover.py
+      - name: Archive failed io test result
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: VRMs (${{ github.job }}#${{ strategy.job-index }})
+          path: tests/resources/vrm/*/temp
+
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Install deb packages
+        run: |
+          sudo apt-get update -qq || true
+          sudo apt-get install -y python3 shellcheck shfmt uchardet
+        env:
+          DEBIAN_FRONTEND: noninteractive
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version-file: .dvmrc
+      - name: Disable git config core.quotepath
+        run: git config core.quotepath off
+      - name: Check file permissions
+        run: |
+          git ls-files ':!tools/*.sh' ':!tools/*.py' ':!tests/resources' ':!typings' | while read -r f; do
+            echo "$f"
+            if [ -x "$f" ]; then
+              echo "$f has unnecessary executable permission."
+              exit 1
+            fi
+          done
+          git ls-files 'tools/*.sh' 'tools/*.py' | while read -r f; do
+            echo "$f"
+            if [ ! -x "$f" ]; then
+              echo "$f has no executable permission."
+              exit 1
+            fi
+          done
+      - name: Check file name characters
+        run: |
+          git ls-files | while read -r f; do
+            encoding=$(echo "$f" | uchardet)
+            if [ "$encoding" != "ASCII" ]; then
+              echo "$f is not ascii file name but $encoding."
+              exit 1
+            fi
+          done
+
+          git ls-files "*.py" "*.pyi" | while read -r f; do
+            if [ "$f" != "$(echo "$f" | LC_ALL=C tr "[:upper:]" "[:lower:]")" ]; then
+              echo "$f contains uppercase character"
+              exit 1
+            fi
+          done
+      - name: Install UV
+        run: |
+          curl --fail --show-error --location https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - name: Install UV dependencies
+        run: |
+          for _ in $(seq 5); do
+            if uv sync; then
+              break
+            fi
+          done
+      - name: Check source code formatting
+        run: |
+          ./tools/format.sh
+          git diff --exit-code
+      - name: Check property type annotations
+        run: |
+          uv run python tools/property_typing.py > property_typing.log
+          ./tools/format.sh
+          git diff --exit-code
+      - name: Install hadolint
+        run: ./tools/install_hadolint.sh
+      - name: Lint
+        run: ./tools/lint.sh
+      - name: Sanity Check
+        run: |
+          uv run python -c "import io_scene_vrm; io_scene_vrm.register(); io_scene_vrm.unregister()"
+      - name: Check VRM Validator works correctly
+        run: |
+          for failure_vrm_path in failure.vrm tests/failure.vrm; do
+            touch "$failure_vrm_path"
+            if npm exec --yes --package=gltf-validator -- node ./tools/vrm_validator.js; then
+              echo "VRM Validator dones't work correctly"
+              exit 1
+            fi
+            rm "$failure_vrm_path"
+          done
+
+  super-linter:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # for super-linter
+      - name: Super-Linter
+        uses: super-linter/super-linter@v7.3.0
+        env:
+          LINTER_RULES_PATH: /
+          FILTER_REGEX_EXCLUDE: ^/github/workspace/CHANGELOG\.md$ # CHANGELOG.mdはrelease-pleaseによる自動生成ファイル
+          LOG_LEVEL: NOTICE
+          MARKDOWN_CONFIG_FILE: .markdownlint.yaml
+          GITHUB_ACTIONS_CONFIG_FILE: .github/actionlint.yaml
+          VALIDATE_GO: false
+          VALIDATE_GO_MODULES: false
+          VALIDATE_HTML: false
+          VALIDATE_JAVASCRIPT_STANDARD: false
+          VALIDATE_JSCPD: false
+          VALIDATE_JSON: false
+          VALIDATE_PYTHON_BLACK: false
+          VALIDATE_PYTHON_ISORT: false
+          VALIDATE_PYTHON_MYPY: false
+          VALIDATE_PYTHON_PYINK: false
+          VALIDATE_PYTHON_PYLINT: false
+          VALIDATE_TYPESCRIPT_ES: false
+          VALIDATE_TYPESCRIPT_STANDARD: false
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
