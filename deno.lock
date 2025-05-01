@@ -1,0 +1,38 @@
+{
+  "version": "5",
+  "specifiers": {
+    "npm:gltf-validator@*": "2.0.0-dev.3.10",
+    "npm:prettier@*": "3.5.3",
+    "npm:pyright@*": "1.1.400"
+  },
+  "npm": {
+    "fsevents@2.3.3": {
+      "integrity": "sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw==",
+      "os": ["darwin"],
+      "scripts": true
+    },
+    "gltf-validator@2.0.0-dev.3.10": {
+      "integrity": "sha512-odJ4k0tRkGXiDGn78yDBg+fBbAIvBnXxh3RwAta0emSxGtyagFE8B4xELB1oYe3S5RD8Ci3uZAsZaascH2LAEQ=="
+    },
+    "prettier@3.5.3": {
+      "integrity": "sha512-QQtaxnoDJeAkDvDKWCLiwIXkTgRhwYDEQCghU9Z6q03iyek/rxRh/2lC3HB7P8sWT2xC/y5JDctPLBIGzHKbhw==",
+      "bin": true
+    },
+    "pyright@1.1.400": {
+      "integrity": "sha512-e0NFMPWhMvPn4siTAN6MsWZ6S/ePydUp1BOXbkh+8I+H+/KulnBb+2ceHNkI32nxZWalQxfUMNoGCHdGMXsmUA==",
+      "optionalDependencies": [
+        "fsevents"
+      ],
+      "bin": true
+    }
+  },
+  "workspace": {
+    "packageJson": {
+      "dependencies": [
+        "npm:gltf-validator@*",
+        "npm:prettier@*",
+        "npm:pyright@*"
+      ]
+    }
+  }
+}
