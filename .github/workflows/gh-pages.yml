@@ -67,6 +67,7 @@ jobs:
 
             exit 1
           fi
+          zip -rT docs/.vitepress/dist/releases/VRM_Addon_for_Blender-release.zip
 
           # There are image links from README.md and Extensions Platform. Will organize later.
           mkdir -p docs/.vitepress/dist/images
@@ -75,5 +76,5 @@ jobs:
       - uses: actions/upload-pages-artifact@v4
         with:
           path: docs/.vitepress/dist
-      - uses: actions/deploy-pages@v4
-        id: deployment
+      # - uses: actions/deploy-pages@v4
+      #   id: deployment
