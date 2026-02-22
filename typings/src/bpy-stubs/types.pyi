@@ -89,6 +89,8 @@ class ID(bpy_struct, __CustomProperty):
     def animation_data_clear(self) -> None: ...
     def user_remap(self, new_id: ID) -> None: ...
     def update_tag(self, refresh: set[str] = ...) -> None: ...
+    @property
+    def preview(self) -> ImagePreview | None: ...
     def copy(self) -> ID: ...
 
 class Property(bpy_struct):
@@ -173,6 +175,10 @@ class BlenderRNA(bpy_struct):
     ) -> bpy_prop_collection[
         Property  # TODO: verify if this matches bpy.types.Property
     ]: ...  # Does not exist in documentation.
+
+class ImagePreview(bpy_struct):
+    @property
+    def icon_id(self) -> int: ...
 
 class Gizmo(bpy_struct):
     alpha: float
@@ -319,6 +325,7 @@ class Action(ID):
     @property
     def slots(self) -> ActionSlots: ...
 
+class TextureSlot(bpy_struct): ...
 class Texture(ID): ...
 
 class LayerObjects(bpy_prop_collection["Object"]):
@@ -710,6 +717,15 @@ class UILayout(bpy_struct):
         filter: str = "ALL",
         hide_buttons: bool = False,
     ) -> None: ...
+    def template_preview(
+        self,
+        id: ID,
+        show_buttons: bool = True,
+        parent: ID | None = None,
+        slot: TextureSlot | None = None,
+        preview_id: str = "",
+    ) -> None: ...
+    def template_icon(self, icon_value: int, scale: float = 1.0) -> None: ...
     def template_list(
         self,
         listtype_name: str,
@@ -725,6 +741,8 @@ class UILayout(bpy_struct):
         sort_reverse: bool = False,
         sort_lock: bool = False,
     ) -> None: ...
+    @classmethod
+    def icon(cls, data: AnyType) -> int: ...
 
 class AddonPreferences(bpy_struct):
     layout: UILayout  # TODO: No documentation
@@ -2131,6 +2149,14 @@ class BlendDataImages(bpy_prop_collection[Image]):
         tiled: bool = False,
     ) -> Image: ...
     def load(self, filepath: str, check_existing: bool = False) -> Image: ...
+    def remove(
+        self,
+        image: Image,
+        *,
+        do_unlink: bool = True,
+        do_id_user: bool = True,
+        do_ui_user: bool = True,
+    ) -> None: ...
 
 class BlendDataArmatures(bpy_prop_collection[Armature]):
     def new(self, name: str) -> Armature: ...
