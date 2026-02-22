@@ -1225,6 +1225,10 @@ class SpringBone1SpringBonePropertyGroup(PropertyGroup):
         update=update_enable_animation,
     )
 
+    initial_automatic_spring_bone_assignment: BoolProperty(  # type: ignore[valid-type]
+        default=True,
+    )
+
     # for UI
     show_expanded_colliders: BoolProperty(  # type: ignore[valid-type]
         name="Spring Bone Colliders"
@@ -1253,6 +1257,7 @@ class SpringBone1SpringBonePropertyGroup(PropertyGroup):
             SpringBone1SpringPropertyGroup
         ]
         enable_animation: bool  # type: ignore[no-redef]
+        initial_automatic_spring_bone_assignment: bool  # type: ignore[no-redef]
         show_expanded_colliders: bool  # type: ignore[no-redef]
         show_expanded_collider_groups: bool  # type: ignore[no-redef]
         show_expanded_springs: bool  # type: ignore[no-redef]
