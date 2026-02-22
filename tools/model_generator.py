@@ -2,11 +2,13 @@
 # SPDX-License-Identifier: MIT OR GPL-3.0-or-later
 
 import logging
+import math
 import struct
 import sys
 from pathlib import Path
 
 from io_scene_vrm.common.deep import Json, make_json
+from io_scene_vrm.common.gl import GL_FLOAT
 from io_scene_vrm.common.gltf import pack_glb, parse_glb
 
 logging.basicConfig(level=logging.INFO)
@@ -196,7 +198,7 @@ def main(argv: list[str]) -> int:
             "bufferView": position_buffer_view_index,
             "byteOffset": 0,
             "type": "VEC3",
-            "componentType": 5126,  # GL_FLOAT
+            "componentType": GL_FLOAT,
             "count": len(positions),
             "min": [-0.1, -0.1, -0.1],
             "max": [0.1, 0.1, 0.1],
@@ -208,7 +210,7 @@ def main(argv: list[str]) -> int:
             "bufferView": texcoord_buffer_view_index,
             "byteOffset": 0,
             "type": "VEC2",
-            "componentType": 5126,  # GL_FLOAT
+            "componentType": GL_FLOAT,
             "count": len(texcoords),
             "min": [0.0, 0.0],
             "max": [1.0, 1.0],
@@ -263,6 +265,14 @@ def main(argv: list[str]) -> int:
             "source": image_index,
         }
     )
+    # Second texture (same image) used for KHR_character_expression_texture demo
+    texture_index_2 = len(texture_dicts)
+    texture_dicts.append(
+        {
+            "sampler": image_sampler_index,
+            "source": image_index,
+        }
+    )
 
     material_dicts = json_dict.get("materials")
     if not isinstance(material_dicts, list):
@@ -283,7 +293,7 @@ def main(argv: list[str]) -> int:
                 "bufferView": color_buffer_view_index,
                 "byteOffset": 0,
                 "type": "VEC3",
-                "componentType": 5126,  # GL_FLOAT
+                "componentType": GL_FLOAT,
                 "count": len(colors),
                 "min": [0.0, 0.0, 0.0],
                 "max": [1.0, 1.0, 1.0],
@@ -434,11 +444,618 @@ def main(argv: list[str]) -> int:
         "rightHand": {"node": right_hand_index},
     }
 
+    # --- Morph targets for KHR_character_expression ---
+    # Four facial expressions driven by morph targets
+    morph_expressions = ["happy", "angry", "blink", "jawOpen"]
+    # Position deltas for each morph target (24 vertices)
+    morph_target_deltas: list[list[tuple[float, float, float]]] = [
+        # happy: upper vertices move up
+        [(0.0, 0.02, 0.0) if pos[1] > 0.0 else (0.0, 0.0, 0.0) for pos in positions],
+        # angry: upper vertices compress inward
+        [
+            (pos[0] * -0.2, -0.01, 0.0) if pos[1] > 0.0 else (0.0, 0.0, 0.0)
+            for pos in positions
+        ],
+        # blink: near-equator vertices close inward
+        [
+            (0.0, -0.02, 0.0) if abs(pos[1]) < 0.05 else (0.0, 0.0, 0.0)
+            for pos in positions
+        ],
+        # jawOpen: lower vertices move down
+        [(0.0, -0.02, 0.0) if pos[1] < 0.0 else (0.0, 0.0, 0.0) for pos in positions],
+    ]
+    morph_target_accessor_indices = list[int]()
+    for deltas in morph_target_deltas:
+        morph_byte_offset = len(binary_chunk)
+        flat_deltas = sum(deltas, ())
+        morph_bytes = struct.pack(f"<{len(flat_deltas)}f", *flat_deltas)
+        binary_chunk += morph_bytes
+        morph_bv_index = len(buffer_view_dicts)
+        buffer_view_dicts.append(
+            {
+                "buffer": 0,
+                "byteOffset": morph_byte_offset,
+                "byteLength": len(morph_bytes),
+                "target": 34962,  # ARRAY_BUFFER
+            }
+        )
+        morph_acc_index = len(accessor_dicts)
+        morph_target_accessor_indices.append(morph_acc_index)
+        accessor_dicts.append(
+            {
+                "bufferView": morph_bv_index,
+                "byteOffset": 0,
+                "type": "VEC3",
+                "componentType": GL_FLOAT,
+                "count": len(positions),
+            }
+        )
+
+    # Add morph targets to the mesh primitive and set targetNames in extras
+    mesh_dict = mesh_dicts[mesh_index]
+    if isinstance(mesh_dict, dict):
+        primitives_list = mesh_dict.get("primitives")
+        if isinstance(primitives_list, list) and primitives_list:
+            prim_dict = primitives_list[0]
+            if isinstance(prim_dict, dict):
+                prim_dict["targets"] = [
+                    {"POSITION": morph_target_accessor_indices[i]}
+                    for i in range(len(morph_expressions))
+                ]
+        mesh_dict["extras"] = make_json({"targetNames": morph_expressions})
+
+    # Set initial morph target weights on the spine node
+    spine_node_dict = node_dicts[spine_index]
+    if isinstance(spine_node_dict, dict):
+        spine_node_dict["weights"] = make_json([0.0] * len(morph_expressions))
+
+    # --- Shared animation accessors ---
+    # Time accessor for 2-keyframe animations: t=0.0 and t=1.0
+    expr_time_byte_offset = len(binary_chunk)
+    expr_time_bytes = struct.pack("<2f", 0.0, 1.0)
+    binary_chunk += expr_time_bytes
+    expr_time_bv_index = len(buffer_view_dicts)
+    buffer_view_dicts.append(
+        {
+            "buffer": 0,
+            "byteOffset": expr_time_byte_offset,
+            "byteLength": len(expr_time_bytes),
+        }
+    )
+    expr_time_acc_index = len(accessor_dicts)
+    accessor_dicts.append(
+        {
+            "bufferView": expr_time_bv_index,
+            "byteOffset": 0,
+            "type": "SCALAR",
+            "componentType": GL_FLOAT,
+            "count": 2,
+            "min": [0.0],
+            "max": [1.0],
+        }
+    )
+    # Weight output accessor: 0.0 → 1.0 (shared by morphtarget expression samplers)
+    expr_weight_byte_offset = len(binary_chunk)
+    expr_weight_bytes = struct.pack("<2f", 0.0, 1.0)
+    binary_chunk += expr_weight_bytes
+    expr_weight_bv_index = len(buffer_view_dicts)
+    buffer_view_dicts.append(
+        {
+            "buffer": 0,
+            "byteOffset": expr_weight_byte_offset,
+            "byteLength": len(expr_weight_bytes),
+        }
+    )
+    expr_weight_acc_index = len(accessor_dicts)
+    accessor_dicts.append(
+        {
+            "bufferView": expr_weight_bv_index,
+            "byteOffset": 0,
+            "type": "SCALAR",
+            "componentType": GL_FLOAT,
+            "count": 2,
+            "min": [0.0],
+            "max": [1.0],
+        }
+    )
+
+    # Texture index output: texture_index → texture_index_2 (for STEP swap)
+    tex_swap_byte_offset = len(binary_chunk)
+    tex_swap_bytes = struct.pack("<2f", float(texture_index), float(texture_index_2))
+    binary_chunk += tex_swap_bytes
+    tex_swap_bv_index = len(buffer_view_dicts)
+    buffer_view_dicts.append(
+        {
+            "buffer": 0,
+            "byteOffset": tex_swap_byte_offset,
+            "byteLength": len(tex_swap_bytes),
+        }
+    )
+    tex_swap_acc_index = len(accessor_dicts)
+    accessor_dicts.append(
+        {
+            "bufferView": tex_swap_bv_index,
+            "byteOffset": 0,
+            "type": "SCALAR",
+            "componentType": GL_FLOAT,
+            "count": 2,
+            "min": [float(texture_index)],
+            "max": [float(texture_index_2)],
+        }
+    )
+
+    # lookUp rotation output: identity → +20° around X (head looks up)
+    look_up_angle = math.pi / 9  # 20 degrees
+    look_up_rot_byte_offset = len(binary_chunk)
+    look_up_rot_bytes = struct.pack(
+        "<8f",
+        0.0,
+        0.0,
+        0.0,
+        1.0,  # identity quaternion [x,y,z,w] at t=0
+        math.sin(look_up_angle / 2),
+        0.0,
+        0.0,
+        math.cos(look_up_angle / 2),  # +20° around X [x,y,z,w] at t=1
+    )
+    binary_chunk += look_up_rot_bytes
+    look_up_rot_bv_index = len(buffer_view_dicts)
+    buffer_view_dicts.append(
+        {
+            "buffer": 0,
+            "byteOffset": look_up_rot_byte_offset,
+            "byteLength": len(look_up_rot_bytes),
+        }
+    )
+    look_up_rot_acc_index = len(accessor_dicts)
+    accessor_dicts.append(
+        {
+            "bufferView": look_up_rot_bv_index,
+            "byteOffset": 0,
+            "type": "VEC4",
+            "componentType": GL_FLOAT,
+            "count": 2,
+        }
+    )
+
+    # --- Build expression animations ---
+    animation_dicts = json_dict.get("animations")
+    if not isinstance(animation_dicts, list):
+        animation_dicts = []
+        json_dict["animations"] = animation_dicts
+
+    # happy: morphtarget weight (LINEAR) + texture swap (STEP)
+    happy_anim_index = len(animation_dicts)
+    animation_dicts.append(
+        make_json(
+            {
+                "name": "happy",
+                "channels": [
+                    {
+                        "sampler": 0,
+                        "target": {
+                            "path": "pointer",
+                            "extensions": {
+                                "KHR_animation_pointer": {
+                                    "pointer": f"/nodes/{spine_index}/weights/0",
+                                }
+                            },
+                        },
+                    },
+                    {
+                        "sampler": 1,
+                        "target": {
+                            "path": "pointer",
+                            "extensions": {
+                                "KHR_animation_pointer": {
+                                    "pointer": f"/materials/{material_index}"
+                                    "/pbrMetallicRoughness/baseColorTexture/index",
+                                }
+                            },
+                        },
+                    },
+                ],
+                "samplers": [
+                    {
+                        "input": expr_time_acc_index,
+                        "output": expr_weight_acc_index,
+                        "interpolation": "LINEAR",
+                    },
+                    {
+                        "input": expr_time_acc_index,
+                        "output": tex_swap_acc_index,
+                        "interpolation": "STEP",
+                    },
+                ],
+            }
+        )
+    )
+
+    # angry: morphtarget weight (LINEAR)
+    angry_anim_index = len(animation_dicts)
+    animation_dicts.append(
+        make_json(
+            {
+                "name": "angry",
+                "channels": [
+                    {
+                        "sampler": 0,
+                        "target": {
+                            "path": "pointer",
+                            "extensions": {
+                                "KHR_animation_pointer": {
+                                    "pointer": f"/nodes/{spine_index}/weights/1",
+                                }
+                            },
+                        },
+                    }
+                ],
+                "samplers": [
+                    {
+                        "input": expr_time_acc_index,
+                        "output": expr_weight_acc_index,
+                        "interpolation": "LINEAR",
+                    }
+                ],
+            }
+        )
+    )
+
+    # blink: morphtarget weight (STEP for binary toggle)
+    blink_anim_index = len(animation_dicts)
+    animation_dicts.append(
+        make_json(
+            {
+                "name": "blink",
+                "channels": [
+                    {
+                        "sampler": 0,
+                        "target": {
+                            "path": "pointer",
+                            "extensions": {
+                                "KHR_animation_pointer": {
+                                    "pointer": f"/nodes/{spine_index}/weights/2",
+                                }
+                            },
+                        },
+                    }
+                ],
+                "samplers": [
+                    {
+                        "input": expr_time_acc_index,
+                        "output": expr_weight_acc_index,
+                        "interpolation": "STEP",
+                    }
+                ],
+            }
+        )
+    )
+
+    # jawOpen: morphtarget weight (LINEAR)
+    jaw_open_anim_index = len(animation_dicts)
+    animation_dicts.append(
+        make_json(
+            {
+                "name": "jawOpen",
+                "channels": [
+                    {
+                        "sampler": 0,
+                        "target": {
+                            "path": "pointer",
+                            "extensions": {
+                                "KHR_animation_pointer": {
+                                    "pointer": f"/nodes/{spine_index}/weights/3",
+                                }
+                            },
+                        },
+                    }
+                ],
+                "samplers": [
+                    {
+                        "input": expr_time_acc_index,
+                        "output": expr_weight_acc_index,
+                        "interpolation": "LINEAR",
+                    }
+                ],
+            }
+        )
+    )
+
+    # lookUp: head joint rotation (LINEAR)
+    look_up_anim_index = len(animation_dicts)
+    animation_dicts.append(
+        make_json(
+            {
+                "name": "lookUp",
+                "channels": [
+                    {
+                        "sampler": 0,
+                        "target": {
+                            "node": head_index,
+                            "path": "rotation",
+                        },
+                    }
+                ],
+                "samplers": [
+                    {
+                        "input": expr_time_acc_index,
+                        "output": look_up_rot_acc_index,
+                        "interpolation": "LINEAR",
+                    }
+                ],
+            }
+        )
+    )
+
+    # Map expression name → animation index (used below for KHR_character_expression)
+    expr_animation_indices = {
+        "happy": happy_anim_index,
+        "angry": angry_anim_index,
+        "blink": blink_anim_index,
+        "jawOpen": jaw_open_anim_index,
+        "lookUp": look_up_anim_index,
+    }
+
+    # --- Reference pose animations (KHR_character_reference_pose) ---
+    joint_node_indices = [
+        hips_index,
+        spine_index,
+        head_index,
+        left_upper_leg_index,
+        left_lower_leg_index,
+        left_foot_index,
+        left_upper_arm_index,
+        left_lower_arm_index,
+        left_hand_index,
+        right_upper_leg_index,
+        right_lower_leg_index,
+        right_foot_index,
+        right_upper_arm_index,
+        right_lower_arm_index,
+        right_hand_index,
+    ]
+    joint_local_translations: list[tuple[float, float, float]] = [
+        (0.0, 0.5, 0.0),  # hips
+        (0.0, 0.25, 0.0),  # spine
+        (0.0, 0.5, 0.0),  # head
+        (0.125, 0.0, 0.0),  # leftUpperLeg
+        (0.0, -0.25, 0.0),  # leftLowerLeg
+        (0.0, -0.25, 0.0),  # leftFoot
+        (0.25, 0.25, 0.0),  # leftUpperArm
+        (0.25, 0.0, 0.0),  # leftLowerArm
+        (0.25, 0.0, 0.0),  # leftHand
+        (-0.125, 0.0, 0.0),  # rightUpperLeg
+        (0.0, -0.25, 0.0),  # rightLowerLeg
+        (0.0, -0.25, 0.0),  # rightFoot
+        (-0.25, 0.25, 0.0),  # rightUpperArm
+        (-0.25, 0.0, 0.0),  # rightLowerArm
+        (-0.25, 0.0, 0.0),  # rightHand
+    ]
+    n_joints = len(joint_node_indices)
+
+    # Single-keyframe time accessor at t=0 (shared by T-Pose and A-Pose)
+    tpose_time_byte_offset = len(binary_chunk)
+    tpose_time_bytes = struct.pack("<f", 0.0)
+    binary_chunk += tpose_time_bytes
+    tpose_time_bv_index = len(buffer_view_dicts)
+    buffer_view_dicts.append(
+        {
+            "buffer": 0,
+            "byteOffset": tpose_time_byte_offset,
+            "byteLength": len(tpose_time_bytes),
+        }
+    )
+    tpose_time_acc_index = len(accessor_dicts)
+    accessor_dicts.append(
+        {
+            "bufferView": tpose_time_bv_index,
+            "byteOffset": 0,
+            "type": "SCALAR",
+            "componentType": GL_FLOAT,
+            "count": 1,
+            "min": [0.0],
+            "max": [0.0],
+        }
+    )
+
+    # T-Pose rotation: single identity quaternion shared by all joints
+    tpose_rot_byte_offset = len(binary_chunk)
+    tpose_rot_bytes = struct.pack("<4f", 0.0, 0.0, 0.0, 1.0)  # [x,y,z,w] identity
+    binary_chunk += tpose_rot_bytes
+    tpose_rot_bv_index = len(buffer_view_dicts)
+    buffer_view_dicts.append(
+        {
+            "buffer": 0,
+            "byteOffset": tpose_rot_byte_offset,
+            "byteLength": len(tpose_rot_bytes),
+        }
+    )
+    tpose_rot_acc_index = len(accessor_dicts)
+    accessor_dicts.append(
+        {
+            "bufferView": tpose_rot_bv_index,
+            "byteOffset": 0,
+            "type": "VEC4",
+            "componentType": 5126,  # GL_FLOAT
+            "count": 1,
+        }
+    )
+
+    # Joint translations packed sequentially; one accessor per joint via byteOffset
+    tpose_trans_byte_offset = len(binary_chunk)
+    flat_joint_translations: list[float] = []
+    for jt in joint_local_translations:
+        flat_joint_translations.extend(jt)
+    tpose_trans_bytes = struct.pack(
+        f"<{len(flat_joint_translations)}f", *flat_joint_translations
+    )
+    binary_chunk += tpose_trans_bytes
+    tpose_trans_bv_index = len(buffer_view_dicts)
+    buffer_view_dicts.append(
+        {
+            "buffer": 0,
+            "byteOffset": tpose_trans_byte_offset,
+            "byteLength": len(tpose_trans_bytes),
+        }
+    )
+    tpose_trans_acc_indices = list[int]()
+    for ji in range(n_joints):
+        trans_acc_index = len(accessor_dicts)
+        tpose_trans_acc_indices.append(trans_acc_index)
+        accessor_dicts.append(
+            {
+                "bufferView": tpose_trans_bv_index,
+                "byteOffset": ji * 12,  # 3 floats * 4 bytes per VEC3
+                "type": "VEC3",
+                "componentType": GL_FLOAT,
+                "count": 1,
+            }
+        )
+
+    # T-Pose: identity rotations + local translations for all joints
+    tpose_samplers: list[dict[str, object]] = [
+        # Sampler 0: identity rotation shared by all joints
+        {
+            "input": tpose_time_acc_index,
+            "output": tpose_rot_acc_index,
+            "interpolation": "STEP",
+        },
+        *[
+            {
+                "input": tpose_time_acc_index,
+                "output": tpose_trans_acc_indices[ji],
+                "interpolation": "STEP",
+            }
+            for ji in range(n_joints)
+        ],
+    ]
+    tpose_channels: list[dict[str, object]] = [
+        *[
+            {"sampler": 0, "target": {"node": node_index, "path": "rotation"}}
+            for node_index in joint_node_indices
+        ],
+        *[
+            {
+                "sampler": ji + 1,
+                "target": {"node": node_index, "path": "translation"},
+            }
+            for ji, node_index in enumerate(joint_node_indices)
+        ],
+    ]
+    animation_dicts.append(
+        make_json(
+            {
+                "name": "TPose",
+                "channels": tpose_channels,
+                "samplers": tpose_samplers,
+                "extensions": {"KHR_character_reference_pose": {"poseType": "TPose"}},
+            }
+        )
+    )
+
+    # A-Pose: upper arms rotated ~45° downward, all other joints identity
+    apose_arm_angle = math.pi / 4  # 45 degrees
+    apose_rotations: list[tuple[float, float, float, float]] = []
+    for node_index in joint_node_indices:
+        if node_index == left_upper_arm_index:
+            # Left arm: -45° around Z → arm goes from +X toward -Y
+            a = -apose_arm_angle
+            apose_rotations.append((0.0, 0.0, math.sin(a / 2), math.cos(a / 2)))
+        elif node_index == right_upper_arm_index:
+            # Right arm: +45° around Z → arm goes from -X toward -Y (symmetric)
+            a = apose_arm_angle
+            apose_rotations.append((0.0, 0.0, math.sin(a / 2), math.cos(a / 2)))
+        else:
+            apose_rotations.append((0.0, 0.0, 0.0, 1.0))  # identity
+
+    apose_rot_byte_offset = len(binary_chunk)
+    flat_apose_rots: list[float] = []
+    for rot in apose_rotations:
+        flat_apose_rots.extend(rot)
+    apose_rot_bytes = struct.pack(f"<{len(flat_apose_rots)}f", *flat_apose_rots)
+    binary_chunk += apose_rot_bytes
+    apose_rot_bv_index = len(buffer_view_dicts)
+    buffer_view_dicts.append(
+        {
+            "buffer": 0,
+            "byteOffset": apose_rot_byte_offset,
+            "byteLength": len(apose_rot_bytes),
+        }
+    )
+    apose_rot_acc_indices = list[int]()
+    for ji in range(n_joints):
+        rot_acc_index = len(accessor_dicts)
+        apose_rot_acc_indices.append(rot_acc_index)
+        accessor_dicts.append(
+            {
+                "bufferView": apose_rot_bv_index,
+                "byteOffset": ji * 16,  # 4 floats * 4 bytes per VEC4
+                "type": "VEC4",
+                "componentType": GL_FLOAT,
+                "count": 1,
+            }
+        )
+
+    # A-Pose: per-joint rotation samplers; reuse T-Pose translation accessors
+    apose_samplers: list[dict[str, object]] = [
+        *[
+            {
+                "input": tpose_time_acc_index,
+                "output": apose_rot_acc_indices[ji],
+                "interpolation": "STEP",
+            }
+            for ji in range(n_joints)
+        ],
+        *[
+            {
+                "input": tpose_time_acc_index,
+                "output": tpose_trans_acc_indices[ji],
+                "interpolation": "STEP",
+            }
+            for ji in range(n_joints)
+        ],
+    ]
+    apose_channels: list[dict[str, object]] = [
+        *[
+            {"sampler": ji, "target": {"node": node_index, "path": "rotation"}}
+            for ji, node_index in enumerate(joint_node_indices)
+        ],
+        *[
+            {
+                "sampler": n_joints + ji,
+                "target": {"node": node_index, "path": "translation"},
+            }
+            for ji, node_index in enumerate(joint_node_indices)
+        ],
+    ]
+    animation_dicts.append(
+        make_json(
+            {
+                "name": "APose",
+                "channels": apose_channels,
+                "samplers": apose_samplers,
+                "extensions": {"KHR_character_reference_pose": {"poseType": "APose"}},
+            }
+        )
+    )
+
     extensions_used = json_dict.get("extensionsUsed")
     if not isinstance(extensions_used, list):
         extensions_used = []
         json_dict["extensionsUsed"] = extensions_used
-    for extension_name in ["VRMC_vrm", "KHR_character", "KHR_xmp_json_ld"]:
+    for extension_name in [
+        "VRMC_vrm",
+        "KHR_character",
+        "KHR_xmp_json_ld",
+        "KHR_character_skeleton_mapping",
+        "KHR_character_expression",
+        "KHR_character_expression_morphtarget",
+        "KHR_character_expression_joint",
+        "KHR_character_expression_texture",
+        "KHR_character_expression_mapping",
+        "KHR_character_reference_pose",
+        "KHR_animation_pointer",
+    ]:
         if extension_name not in extensions_used:
             extensions_used.append(extension_name)
 
@@ -501,6 +1118,121 @@ def main(argv: list[str]) -> int:
 
     extensions_khr_character = {"rootNode": hips_index}
     extensions_dict["KHR_character"] = make_json(extensions_khr_character)
+
+    # KHR_character_skeleton_mapping: maps standard rig vocabularies to model joints
+    extensions_dict["KHR_character_skeleton_mapping"] = make_json(
+        {
+            "skeletalRigMappings": {
+                "vrmHumanoid": {
+                    "hips": "hips",
+                    "spine": "spine",
+                    "head": "head",
+                    "leftUpperLeg": "leftUpperLeg",
+                    "leftLowerLeg": "leftLowerLeg",
+                    "leftFoot": "leftFoot",
+                    "leftUpperArm": "leftUpperArm",
+                    "leftLowerArm": "leftLowerArm",
+                    "leftHand": "leftHand",
+                    "rightUpperLeg": "rightUpperLeg",
+                    "rightLowerLeg": "rightLowerLeg",
+                    "rightFoot": "rightFoot",
+                    "rightUpperArm": "rightUpperArm",
+                    "rightLowerArm": "rightLowerArm",
+                    "rightHand": "rightHand",
+                },
+                "unityHumanoid": {
+                    "Hips": "hips",
+                    "Spine": "spine",
+                    "Head": "head",
+                    "LeftUpperLeg": "leftUpperLeg",
+                    "LeftLowerLeg": "leftLowerLeg",
+                    "LeftFoot": "leftFoot",
+                    "LeftUpperArm": "leftUpperArm",
+                    "LeftLowerArm": "leftLowerArm",
+                    "LeftHand": "leftHand",
+                    "RightUpperLeg": "rightUpperLeg",
+                    "RightLowerLeg": "rightLowerLeg",
+                    "RightFoot": "rightFoot",
+                    "RightUpperArm": "rightUpperArm",
+                    "RightLowerArm": "rightLowerArm",
+                    "RightHand": "rightHand",
+                },
+            }
+        }
+    )
+
+    # KHR_character_expression: expression animations with typed sub-extensions
+    extensions_dict["KHR_character_expression"] = make_json(
+        {
+            "expressions": [
+                {
+                    "expression": "happy",
+                    "animation": expr_animation_indices["happy"],
+                    "extensions": {
+                        # morphtarget: channel 0 drives weight/0
+                        "KHR_character_expression_morphtarget": {"channels": [0]},
+                        # texture: channel 1 swaps texture
+                        "KHR_character_expression_texture": {"channels": [1]},
+                    },
+                },
+                {
+                    "expression": "angry",
+                    "animation": expr_animation_indices["angry"],
+                    "extensions": {
+                        "KHR_character_expression_morphtarget": {"channels": [0]},
+                    },
+                },
+                {
+                    "expression": "blink",
+                    "animation": expr_animation_indices["blink"],
+                    "extensions": {
+                        "KHR_character_expression_morphtarget": {"channels": [0]},
+                    },
+                },
+                {
+                    "expression": "jawOpen",
+                    "animation": expr_animation_indices["jawOpen"],
+                    "extensions": {
+                        "KHR_character_expression_morphtarget": {"channels": [0]},
+                    },
+                },
+                {
+                    "expression": "lookUp",
+                    "animation": expr_animation_indices["lookUp"],
+                    "extensions": {
+                        # KHR_character_expression_joint: channel 0 drives head rotation
+                        "KHR_character_expression_joint": {"channels": [0]},
+                    },
+                },
+            ]
+        }
+    )
+
+    # KHR_character_expression_mapping: maps expression vocabularies to source names
+    extensions_dict["KHR_character_expression_mapping"] = make_json(
+        {
+            "expressionSetMappings": {
+                "vrmPreset": {
+                    "happy": [{"source": "happy", "weight": 1.0}],
+                    "angry": [{"source": "angry", "weight": 1.0}],
+                    "blink": [{"source": "blink", "weight": 1.0}],
+                    "aa": [{"source": "jawOpen", "weight": 1.0}],
+                    "lookUp": [{"source": "lookUp", "weight": 1.0}],
+                },
+                "arkit": {
+                    "mouthSmileLeft": [{"source": "happy", "weight": 0.6}],
+                    "mouthSmileRight": [{"source": "happy", "weight": 0.6}],
+                    "browLowererLeft": [{"source": "angry", "weight": 0.4}],
+                    "browLowererRight": [{"source": "angry", "weight": 0.4}],
+                    "eyeBlinkLeft": [{"source": "blink", "weight": 0.8}],
+                    "eyeBlinkRight": [{"source": "blink", "weight": 0.8}],
+                    "jawOpen": [{"source": "jawOpen", "weight": 1.0}],
+                    "eyeLookUpLeft": [{"source": "lookUp", "weight": 1.0}],
+                    "eyeLookUpRight": [{"source": "lookUp", "weight": 1.0}],
+                },
+            }
+        }
+    )
 
     extensions_vrmc_vrm = {
         "specVersion": "1.0",
