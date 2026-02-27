@@ -2,3 +2,4 @@
 --cache-server-addr 127.0.0.1
 --platform ubuntu-24.04=-self-hosted
 --reuse
+--strict
