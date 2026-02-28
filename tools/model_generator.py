@@ -7,6 +7,9 @@ import struct
 import sys
 from pathlib import Path
 
+import bpy
+
+from io_scene_vrm.common import ops
 from io_scene_vrm.common.deep import Json, make_json
 from io_scene_vrm.common.gl import GL_FLOAT
 from io_scene_vrm.common.gltf import pack_glb, parse_glb
@@ -1409,6 +1412,17 @@ def main(argv: list[str]) -> int:
     vrm1_bytes = pack_glb(json_dict, binary_chunk)
     output_path.write_bytes(vrm1_bytes)
     logger.info("Generated VRM1 model at: %s", output_path)
+
+    bpy.ops.preferences.addon_enable(module="io_scene_vrm")
+    import_result = ops.import_scene.vrm(filepath=str(output_path))
+    if import_result != {"FINISHED"}:
+        logger.warning(
+            "Importing the generated model failed with result: %s",
+            import_result,
+        )
+        return 1
+
+    logger.info("Completed")
     return 0
 
 
