@@ -219,7 +219,8 @@ def main(argv: list[str]) -> int:
 
     image_bytes = Path(__file__).with_name("model_generator_texture.png").read_bytes()
     padded_image_bytes = bytes(image_bytes)
-    while len(padded_image_bytes) % 16 == 0:
+    # Pad to 4-byte alignment for subsequent accessors.
+    while len(padded_image_bytes) % 4 != 0:
         padded_image_bytes += b"\x00"
     image_buffer_byte_offset = len(binary_chunk)
     binary_chunk += padded_image_bytes
@@ -481,6 +482,12 @@ def main(argv: list[str]) -> int:
         )
         morph_acc_index = len(accessor_dicts)
         morph_target_accessor_indices.append(morph_acc_index)
+        min_x = min(delta[0] for delta in deltas)
+        min_y = min(delta[1] for delta in deltas)
+        min_z = min(delta[2] for delta in deltas)
+        max_x = max(delta[0] for delta in deltas)
+        max_y = max(delta[1] for delta in deltas)
+        max_z = max(delta[2] for delta in deltas)
         accessor_dicts.append(
             {
                 "bufferView": morph_bv_index,
@@ -488,6 +495,8 @@ def main(argv: list[str]) -> int:
                 "type": "VEC3",
                 "componentType": GL_FLOAT,
                 "count": len(positions),
+                "min": [min_x, min_y, min_z],
+                "max": [max_x, max_y, max_z],
             }
         )
 
