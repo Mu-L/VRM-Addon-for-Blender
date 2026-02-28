@@ -20,7 +20,7 @@ from ..editor.khr_xmp_json_ld.property_group import (
     KhrXmpJsonLdKhrCharacterPacketPropertyGroup,
 )
 
-KHR_CHARACTER_SUPPORTED: Final[bool] = bpy.app.version >= (1,)
+KHR_CHARACTER_SUPPORTED: Final[bool] = bpy.app.version >= (100000,)
 
 logger = get_logger(__name__)
 
