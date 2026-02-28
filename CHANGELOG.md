@@ -1,5 +1,17 @@
 # Changelog
 
+## [3.21.0](https://github.com/saturday06/VRM-Addon-for-Blender/compare/v3.20.0...v3.21.0) (2026-02-28)
+
+
+### 🚀 Features
+
+* add thumbnail preview to VRM import license warning dialog ([236b290](https://github.com/saturday06/VRM-Addon-for-Blender/commit/236b2902aa0413d4816a76810f2f5befae85871e))
+
+
+### 🐛 Bug Fixes
+
+* fixed a bug where vrm files sometimes failed to load on Windows ([c00a62b](https://github.com/saturday06/VRM-Addon-for-Blender/commit/c00a62bd51bef1059c474230d4e41c9066a0a282))
+
 ## [3.20.0](https://github.com/saturday06/VRM-Addon-for-Blender/compare/v3.19.5...v3.20.0) (2026-02-22)
 
 
