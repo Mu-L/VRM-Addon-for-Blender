@@ -5,11 +5,10 @@ from collections.abc import Mapping
 from typing import ClassVar, Final, Optional
 
 import bpy
-from bpy.types import Armature, Image, Object
+from bpy.types import Armature, Image, Object, Scene
 from io_scene_gltf2.io.com import gltf2_io
 from io_scene_gltf2.io.imp.gltf2_io_gltf import glTFImporter
 
-from ..common.convert import sequence_or_none
 from ..common.deep import Json, make_json
 from ..common.logger import get_logger
 from ..editor.extension import (
@@ -19,6 +18,11 @@ from ..editor.extension import (
 from ..editor.khr_xmp_json_ld.property_group import (
     KhrXmpJsonLdKhrCharacterPacketPropertyGroup,
 )
+
+if bpy.app.version >= (4, 3):
+    from io_scene_gltf2.blender.imp.vnode import VNode
+else:
+    from io_scene_gltf2.blender.imp.gltf2_blender_vnode import VNode
 
 KHR_CHARACTER_SUPPORTED: Final[bool] = bpy.app.version >= (100000,)
 
@@ -69,112 +73,83 @@ class Gltf2ImportUserExtensionVrm:
 
     # https://github.com/KhronosGroup/glTF-Blender-IO/blob/6f9d0d9fc1bb30e2b0bb019342ffe86bd67358fc/addons/io_scene_gltf2/blender/imp/gltf2_blender_image.py#L51
     def gather_import_image_after_hook(
-        self, image: object, bpy_image: object, gltf_importer: object
+        self,
+        gltf_image: gltf2_io.Image,
+        blender_image: Image,
+        gltf: glTFImporter,
     ) -> None:
         current_import_id = self.current_import_id
         if current_import_id is None:
             return
 
-        if not isinstance(bpy_image, Image):
-            logger.warning(
-                "gather_import_image_after_hook: bpy_image is not a Image but %s",
-                type(bpy_image),
-            )
+        if not isinstance(gltf_data := getattr(gltf, "data", None), gltf2_io.Gltf):
             return
 
-        images = sequence_or_none(
-            getattr(getattr(gltf_importer, "data", None), "images", None)
-        )
-        if images is None:
-            logger.warning(
-                "gather_import_image_after_hook:"
-                " gltf_importer is unexpected structure: %s",
-                gltf_importer,
-            )
+        images = gltf_data.images
+        if not images:
             return
 
-        if image not in images:
-            logger.warning(
-                "gather_import_image_after_hook: %s not in %s", image, images
-            )
+        if gltf_image not in images:
             return
 
-        image_index = images.index(image)
-        bpy_image[current_import_id] = image_index
+        image_index = images.index(gltf_image)
+        blender_image[current_import_id] = image_index
 
 
 class Gltf2ImportUserExtensionVrmKhrCharacter(Gltf2ImportUserExtensionVrm):
     def __init__(self) -> None:
-        self.image_index_to_bpy_image: dict[int, Image] = {}
+        self.image_index_to_blender_image: dict[int, Image] = {}
         self.armature_objects: list[Object] = []
 
     def gather_import_image_after_hook(
-        self, image: object, bpy_image: object, gltf_importer: object
+        self,
+        gltf_image: gltf2_io.Image,
+        blender_image: Image,
+        gltf: glTFImporter,
     ) -> None:
-        super().gather_import_image_after_hook(image, bpy_image, gltf_importer)
+        super().gather_import_image_after_hook(gltf_image, blender_image, gltf)
 
-        if not isinstance(image, gltf2_io.Image):
+        if not isinstance(gltf_data := getattr(gltf, "data", None), gltf2_io.Gltf):
             return
 
-        if not isinstance(gltf_importer, glTFImporter):
-            return
-
-        if not isinstance(bpy_image, Image):
-            logger.warning(
-                "gather_import_image_after_hook: bpy_image is not a Image but %s",
-                type(bpy_image),
-            )
-            return
-
-        # The existence of `gltf_importer.data` is not guaranteed in Blender 4.5.
-        data = getattr(gltf_importer, "data", None)
-        if not isinstance(data, gltf2_io.Gltf):
-            return
-
-        images = data.images
+        images = gltf_data.images
         if not images:
             return
-        if image not in images:
+        if gltf_image not in images:
             return
-        image_index = images.index(image)
-        self.image_index_to_bpy_image[image_index] = bpy_image
+        image_index = images.index(gltf_image)
+        self.image_index_to_blender_image[image_index] = blender_image
 
     def gather_import_node_after_hook(
         self,
-        _vnode: object,
-        _gltf_node: object,
-        blender_object: object,
-        _gltf_importer: object,
+        _vnode: VNode,
+        _gltf_node: gltf2_io.Node,
+        blender_object: Object,
+        _gltf: glTFImporter,
     ) -> None:
         """Track armature objects created during import for KHR_character processing."""
-        if isinstance(blender_object, Object) and blender_object.type == "ARMATURE":
+        if blender_object.type == "ARMATURE":
             self.armature_objects.append(blender_object)
 
     def gather_import_scene_after_nodes_hook(
         self,
-        _gltf_scene: object,
-        _blender_scene: object,
-        gltf_importer: object,
+        _gltf_scene: gltf2_io.Scene,
+        _blender_scene: Scene,
+        gltf: glTFImporter,
     ) -> None:
         """Read KHR_character/KHR_xmp_json_ld and fill armature custom properties."""
-        # The existence of `gltf_importer.data` is not guaranteed in Blender 4.5.
-        data = getattr(gltf_importer, "data", None)
-        if not isinstance(data, gltf2_io.Gltf):
+        if not isinstance(gltf_data := getattr(gltf, "data", None), gltf2_io.Gltf):
             return
 
-        gltf_dict = make_json(data.to_dict())
-        if not isinstance(gltf_dict, dict):
-            return
-
-        extensions_used = gltf_dict.get("extensions_used")
-        if not isinstance(extensions_used, list):
+        extensions_used = gltf_data.extensions_used
+        if not extensions_used:
             return
 
         if "KHR_character" not in extensions_used:
             return
 
-        extensions = gltf_dict.get("extensions")
-        if not isinstance(extensions, dict):
+        extensions = gltf_data.extensions
+        if not extensions:
             return
 
         khr_character_dict = extensions.get("KHR_character")
@@ -184,9 +159,10 @@ class Gltf2ImportUserExtensionVrmKhrCharacter(Gltf2ImportUserExtensionVrm):
         packet_dict = None
         if (
             isinstance(khr_xmp_json_ld_dict := extensions.get("KHR_xmp_json_ld"), dict)
-            and isinstance(packet_dicts := khr_xmp_json_ld_dict.get("packets"), list)
-            and isinstance(asset_dict := gltf_dict.get("asset"), dict)
-            and isinstance(asset_extensions := asset_dict.get("extensions"), dict)
+            and isinstance(
+                packet_dicts := make_json(khr_xmp_json_ld_dict.get("packets")), list
+            )
+            and isinstance(asset_extensions := gltf_data.asset.extensions, dict)
             and isinstance(
                 asset_khr_xmp_dict := asset_extensions.get("KHR_xmp_json_ld"), dict
             )
@@ -212,9 +188,10 @@ class Gltf2ImportUserExtensionVrmKhrCharacter(Gltf2ImportUserExtensionVrm):
             if not isinstance(armature_data, Armature):
                 continue
             ext = get_armature_extension(armature_data)
-            ext.spec_version = (
-                VrmAddonArmatureExtensionPropertyGroup.SPEC_VERSION_KHR_CHARACTER
-            )
+            if "VRMC_vrm" not in extensions_used and "VRM" not in extensions_used:
+                ext.spec_version = (
+                    VrmAddonArmatureExtensionPropertyGroup.SPEC_VERSION_KHR_CHARACTER
+                )
             self.fill_khr_character_xmp_packet(
                 ext.khr_character.khr_xmp_json_ld_packet, packet_dict
             )
@@ -280,7 +257,7 @@ class Gltf2ImportUserExtensionVrmKhrCharacter(Gltf2ImportUserExtensionVrm):
         # khr:thumbnailImage - integer index into the glTF images array
         thumbnail_index = packet_dict.get("khr:thumbnailImage")
         if isinstance(thumbnail_index, int):
-            bpy_image = self.image_index_to_bpy_image.get(thumbnail_index)
+            bpy_image = self.image_index_to_blender_image.get(thumbnail_index)
             if isinstance(bpy_image, Image):
                 xmp.khr_thumbnail_image = bpy_image
 
