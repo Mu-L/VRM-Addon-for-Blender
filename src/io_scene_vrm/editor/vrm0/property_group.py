@@ -1184,3 +1184,4 @@ def get_armature_vrm0_extension(armature: Armature) -> Vrm0PropertyGroup:
 
 def clear_global_variables() -> None:
     Vrm0HumanoidPropertyGroup.pointer_to_last_bone_names_str.clear()
+    Vrm0BlendShapeGroupPropertyGroup.pending_preview_update_armature_data_names.clear()
