@@ -57,6 +57,92 @@ class TestGltf(TestCase):
                 )
                 self.assertIsNone(result, f"Should have failed for URI: {uri}")
 
+    def test_read_accessor_as_bytes_with_byte_stride(self) -> None:
+        buffer_data = b"HEADxxxxABzzxxxxCDzzxxxxEFzzTAIL"
+
+        accessor_dict: dict[str, Json] = {
+            "bufferView": 0,
+            "byteOffset": 4,
+            "componentType": 5121,
+            "count": 3,
+            "type": "VEC2",
+        }
+        buffer_view_dicts: list[Json] = [
+            {"buffer": 0, "byteOffset": 4, "byteLength": 24, "byteStride": 8}
+        ]
+        buffer_dicts: list[Json] = [
+            {
+                "uri": "data:application/gltf-buffer;base64,"
+                + base64.b64encode(buffer_data).decode("ascii")
+            }
+        ]
+
+        result = gltf._read_accessor_as_bytes(
+            accessor_dict,
+            buffer_view_dicts,
+            buffer_dicts,
+            None,
+        )
+
+        self.assertEqual(result, b"ABCDEF")
+
+    def test_read_accessor_with_byte_stride(self) -> None:
+        buffer_data = b"HEADxxxxABzzxxxxCDzzxxxxEFzzTAIL"
+
+        accessor_dict: dict[str, Json] = {
+            "bufferView": 0,
+            "byteOffset": 4,
+            "componentType": 5121,
+            "count": 3,
+            "type": "VEC2",
+        }
+        buffer_view_dicts: list[Json] = [
+            {"buffer": 0, "byteOffset": 4, "byteLength": 24, "byteStride": 8}
+        ]
+        buffer_dicts: list[Json] = [{}]
+
+        result = gltf._read_accessor(
+            accessor_dict,
+            buffer_view_dicts,
+            buffer_dicts,
+            buffer_data,
+        )
+
+        self.assertEqual(result, ((65, 66), (67, 68), (69, 70)))
+
+    def test_read_accessor_as_bytes_invalid_byte_stride(self) -> None:
+        buffer_data = b"abcdef"
+
+        accessor_dict: dict[str, Json] = {
+            "bufferView": 0,
+            "componentType": 5121,
+            "count": 2,
+            "type": "VEC3",
+        }
+        buffer_view_dicts: list[Json] = [
+            {
+                "buffer": 0,
+                "byteOffset": 0,
+                "byteLength": len(buffer_data),
+                "byteStride": 2,
+            }
+        ]
+        buffer_dicts: list[Json] = [
+            {
+                "uri": "data:application/gltf-buffer;base64,"
+                + base64.b64encode(buffer_data).decode("ascii")
+            }
+        ]
+
+        result = gltf._read_accessor_as_bytes(
+            accessor_dict,
+            buffer_view_dicts,
+            buffer_dicts,
+            None,
+        )
+
+        self.assertIsNone(result)
+
     def test_read_accessor_as_bytes_sparse_without_base_buffer_view(self) -> None:
         indices_data = b"\x01\x03"
         values_data = b"\x05\x09"
@@ -113,6 +199,57 @@ class TestGltf(TestCase):
         }
         buffer_view_dicts: list[Json] = [
             {"buffer": 0, "byteOffset": 0, "byteLength": len(base_data)},
+            {"buffer": 1, "byteOffset": 0, "byteLength": len(indices_data)},
+            {"buffer": 2, "byteOffset": 0, "byteLength": len(values_data)},
+        ]
+        buffer_dicts: list[Json] = [
+            {
+                "uri": "data:application/gltf-buffer;base64,"
+                + base64.b64encode(base_data).decode("ascii")
+            },
+            {
+                "uri": "data:application/gltf-buffer;base64,"
+                + base64.b64encode(indices_data).decode("ascii")
+            },
+            {
+                "uri": "data:application/gltf-buffer;base64,"
+                + base64.b64encode(values_data).decode("ascii")
+            },
+        ]
+
+        result = gltf._read_accessor_as_bytes(
+            accessor_dict,
+            buffer_view_dicts,
+            buffer_dicts,
+            None,
+        )
+
+        self.assertEqual(result, b"abcXYZ")
+
+    def test_read_accessor_as_bytes_sparse_over_strided_base_buffer_view(self) -> None:
+        base_data = b"xxxxabc1xxxxdef2"
+        indices_data = b"\x01"
+        values_data = b"XYZ"
+
+        accessor_dict: dict[str, Json] = {
+            "bufferView": 0,
+            "byteOffset": 4,
+            "type": "VEC3",
+            "componentType": 5121,
+            "count": 2,
+            "sparse": {
+                "count": 1,
+                "indices": {"bufferView": 1, "componentType": 5121},
+                "values": {"bufferView": 2},
+            },
+        }
+        buffer_view_dicts: list[Json] = [
+            {
+                "buffer": 0,
+                "byteOffset": 0,
+                "byteLength": len(base_data),
+                "byteStride": 8,
+            },
             {"buffer": 1, "byteOffset": 0, "byteLength": len(indices_data)},
             {"buffer": 2, "byteOffset": 0, "byteLength": len(values_data)},
         ]

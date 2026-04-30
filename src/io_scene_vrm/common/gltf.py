@@ -262,6 +262,47 @@ def _read_buffer_view_as_bytes(
     return buffer_bytes[byte_offset : byte_offset + byte_length]
 
 
+def _remove_byte_stride_padding(
+    buffer_view_dict: Json,
+    buffer_view_bytes: bytes,
+    accessor_byte_offset: int,
+    accessor_count: int,
+    accessor_element_byte_length: int,
+) -> Optional[bytes]:
+    if not isinstance(buffer_view_dict, dict):
+        return None
+    if not 0 <= accessor_byte_offset <= len(buffer_view_bytes):
+        return None
+
+    byte_stride = buffer_view_dict.get("byteStride")
+    if byte_stride is None:
+        return buffer_view_bytes[accessor_byte_offset:]
+
+    if not isinstance(byte_stride, int):
+        return None
+    if byte_stride < accessor_element_byte_length:
+        return None
+    if accessor_count == 0:
+        return b""
+
+    accessor_byte_end = (
+        accessor_byte_offset
+        + byte_stride * (accessor_count - 1)
+        + accessor_element_byte_length
+    )
+    if not 0 <= accessor_byte_end <= len(buffer_view_bytes):
+        return None
+
+    accessor_bytes = bytearray(accessor_count * accessor_element_byte_length)
+    for accessor_index in range(accessor_count):
+        src_start = accessor_byte_offset + byte_stride * accessor_index
+        src_end = src_start + accessor_element_byte_length
+        dest_start = accessor_index * accessor_element_byte_length
+        dest_end = dest_start + accessor_element_byte_length
+        accessor_bytes[dest_start:dest_end] = buffer_view_bytes[src_start:src_end]
+    return bytes(accessor_bytes)
+
+
 def _read_accessor_as_bytes(
     accessor_dict: dict[str, Json],
     buffer_view_dicts: list[Json],
@@ -272,9 +313,15 @@ def _read_accessor_as_bytes(
         return None
     if not isinstance(component_type := accessor_dict.get("componentType"), int):
         return None
-    if not isinstance(count := accessor_dict.get("count"), int):
+    if (
+        not isinstance(accessor_count := accessor_dict.get("count"), int)
+        or accessor_count < 0
+    ):
         return None
-    if not isinstance(accessor_byte_offset := accessor_dict.get("byteOffset", 0), int):
+    if (
+        not isinstance(accessor_byte_offset := accessor_dict.get("byteOffset", 0), int)
+        or accessor_byte_offset < 0
+    ):
         return None
     accessor_component_count = _accessor_type_component_count(accessor_type)
     if accessor_component_count is None:
@@ -284,7 +331,7 @@ def _read_accessor_as_bytes(
         return None
 
     element_byte_length = accessor_component_count * component.byte_length
-    required_byte_length = count * element_byte_length
+    required_byte_length = accessor_count * element_byte_length
 
     base_bytes: Optional[bytes] = None
     key_not_found = object()
@@ -294,14 +341,19 @@ def _read_accessor_as_bytes(
     elif isinstance(buffer_view_index, int) and 0 <= buffer_view_index < len(
         buffer_view_dicts
     ):
+        buffer_view_dict = buffer_view_dicts[buffer_view_index]
         base_buffer_view_bytes = _read_buffer_view_as_bytes(
-            buffer_view_dicts[buffer_view_index], buffer_dicts, bin_chunk_bytes
+            buffer_view_dict, buffer_dicts, bin_chunk_bytes
         )
         if base_buffer_view_bytes is None:
             return None
-        if not (0 <= accessor_byte_offset <= len(base_buffer_view_bytes)):
-            return None
-        base_bytes = base_buffer_view_bytes[accessor_byte_offset:]
+        base_bytes = _remove_byte_stride_padding(
+            buffer_view_dict,
+            base_buffer_view_bytes,
+            accessor_byte_offset,
+            accessor_count,
+            element_byte_length,
+        )
 
     if base_bytes is None:
         return None
@@ -355,7 +407,7 @@ def _read_accessor_as_bytes(
     for index in indices:
         if not isinstance(index, int):
             return None
-        if index <= previous_index or index < 0 or index >= count:
+        if not (previous_index < index < accessor_count):
             return None
         previous_index = index
 
