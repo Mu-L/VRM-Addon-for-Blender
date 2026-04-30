@@ -40,7 +40,13 @@ from ..common.fs import (
     create_unique_indexed_file_path,
 )
 from ..common.gl import GL_FLOAT, GL_LINEAR, GL_REPEAT, GL_UNSIGNED_SHORT
-from ..common.gltf import FLOAT_NEGATIVE_MAX, FLOAT_POSITIVE_MAX, pack_glb, parse_glb
+from ..common.gltf import (
+    FLOAT_NEGATIVE_MAX,
+    FLOAT_POSITIVE_MAX,
+    pack_glb,
+    parse_glb,
+    read_buffer_view_as_bytes,
+)
 from ..common.logger import get_logger
 from ..common.preferences import ImportPreferencesProtocol
 from ..common.progress import PartialProgress, create_progress
@@ -105,6 +111,10 @@ class ParseResult:
         if isinstance(image_uri, str):
             return None
 
+        buffer_dicts = self.json_dict.get("buffers")
+        if not isinstance(buffer_dicts, list):
+            return None
+
         buffer_view_index = image_dict.get("bufferView")
         if not isinstance(buffer_view_index, int):
             return None
@@ -119,19 +129,9 @@ class ParseResult:
         if not isinstance(buffer_view_dict, dict):
             return None
 
-        buffer_index = buffer_view_dict.get("buffer")
-        if buffer_index != 0:
-            return None
-
-        byte_offset = buffer_view_dict.get("byteOffset")
-        if not isinstance(byte_offset, int):
-            return None
-
-        byte_length = buffer_view_dict.get("byteLength")
-        if not isinstance(byte_length, int):
-            return None
-
-        image_bytes = self.bin_chunk[byte_offset : byte_offset + byte_length]
+        image_bytes = read_buffer_view_as_bytes(
+            buffer_view_dict, buffer_dicts, self.bin_chunk
+        )
         if not image_bytes:
             return None
 

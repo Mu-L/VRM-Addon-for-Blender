@@ -205,7 +205,7 @@ def _accessor_type_component_count(accessor_type: str) -> Optional[int]:
     return None
 
 
-def _read_buffer_view_as_bytes(
+def read_buffer_view_as_bytes(
     buffer_view_dict: Json,
     buffer_dicts: list[Json],
     bin_chunk_bytes: Optional[bytes],
@@ -342,7 +342,7 @@ def _read_accessor_as_bytes(
         buffer_view_dicts
     ):
         buffer_view_dict = buffer_view_dicts[buffer_view_index]
-        base_buffer_view_bytes = _read_buffer_view_as_bytes(
+        base_buffer_view_bytes = read_buffer_view_as_bytes(
             buffer_view_dict, buffer_dicts, bin_chunk_bytes
         )
         if base_buffer_view_bytes is None:
@@ -385,7 +385,7 @@ def _read_accessor_as_bytes(
         return None
     if not 0 <= indices_buffer_view_index < len(buffer_view_dicts):
         return None
-    indices_raw_bytes = _read_buffer_view_as_bytes(
+    indices_raw_bytes = read_buffer_view_as_bytes(
         buffer_view_dicts[indices_buffer_view_index], buffer_dicts, bin_chunk_bytes
     )
     if indices_raw_bytes is None:
@@ -416,7 +416,7 @@ def _read_accessor_as_bytes(
         return None
     if not 0 <= values_buffer_view_index < len(buffer_view_dicts):
         return None
-    values_raw_bytes = _read_buffer_view_as_bytes(
+    values_raw_bytes = read_buffer_view_as_bytes(
         buffer_view_dicts[values_buffer_view_index], buffer_dicts, bin_chunk_bytes
     )
     if values_raw_bytes is None:
