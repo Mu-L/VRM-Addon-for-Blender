@@ -52,7 +52,7 @@ fi
 super_linter_container_name="${super_linter_tag_name}-container"
 docker container rm --force "$super_linter_container_name" || true
 docker container create --rm --name "$super_linter_container_name" "$@" "$super_linter_tag_name"
-lint_path=$(mktemp --directory --suffix .super-linter)
+lint_path=$(mktemp -t super-linter.XXXXXXXXXX -d)
 git clone --no-local --depth 2 --recurse-submodules --shallow-submodules "$repository_root_path" "$lint_path"
 (
   set +x
