@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.27.0](https://github.com/saturday06/VRM-Addon-for-Blender/compare/v3.26.8...v3.27.0) (2026-05-01)
+
+
+### 🚀 Features
+
+* preprocess and merge duplicated joint weights ([0770e1d](https://github.com/saturday06/VRM-Addon-for-Blender/commit/0770e1d1b453748eb5c67d56baf0428a1f27cf80))
+
 ## [3.26.8](https://github.com/saturday06/VRM-Addon-for-Blender/compare/v3.26.7...v3.26.8) (2026-04-27)
 
 
