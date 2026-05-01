@@ -1,9 +1,76 @@
 # SPDX-License-Identifier: MIT OR GPL-3.0-or-later
 import base64
+import struct
 from unittest import TestCase
 
 from io_scene_vrm.common import gltf
 from io_scene_vrm.common.convert import Json
+
+_DATA_URI_PREFIX = "data:application/gltf-buffer;base64,"
+
+
+def _require_json_dict(value: Json, context: str) -> dict[str, Json]:
+    if not isinstance(value, dict):
+        message = f"{context} must be a dict"
+        raise TypeError(message)
+    return value
+
+
+def _require_json_list(value: Json, context: str) -> list[Json]:
+    if not isinstance(value, list):
+        message = f"{context} must be a list"
+        raise TypeError(message)
+    return value
+
+
+def _require_json_int(value: Json, context: str) -> int:
+    if not isinstance(value, int):
+        message = f"{context} must be an int"
+        raise TypeError(message)
+    return value
+
+
+def _read_accessor_buffer_bytes(
+    json_dict: dict[str, Json],
+    accessor_index: int,
+) -> bytes:
+    accessor_dicts = _require_json_list(json_dict["accessors"], "accessors")
+    accessor_dict = _require_json_dict(
+        accessor_dicts[accessor_index], f"accessors[{accessor_index}]"
+    )
+    buffer_view_index = _require_json_int(
+        accessor_dict.get("bufferView"), f"accessors[{accessor_index}].bufferView"
+    )
+
+    buffer_view_dicts = _require_json_list(json_dict["bufferViews"], "bufferViews")
+    buffer_view_dict = _require_json_dict(
+        buffer_view_dicts[buffer_view_index], f"bufferViews[{buffer_view_index}]"
+    )
+    buffer_index = _require_json_int(
+        buffer_view_dict.get("buffer"), f"bufferViews[{buffer_view_index}].buffer"
+    )
+    byte_offset = _require_json_int(
+        buffer_view_dict.get("byteOffset", 0),
+        f"bufferViews[{buffer_view_index}].byteOffset",
+    )
+    byte_length = _require_json_int(
+        buffer_view_dict.get("byteLength"),
+        f"bufferViews[{buffer_view_index}].byteLength",
+    )
+
+    buffer_dicts = _require_json_list(json_dict["buffers"], "buffers")
+    uri = _require_json_dict(
+        buffer_dicts[buffer_index], f"buffers[{buffer_index}]"
+    ).get("uri")
+    if not isinstance(uri, str):
+        message = f"buffers[{buffer_index}].uri must be a string"
+        raise TypeError(message)
+    if not uri.startswith(_DATA_URI_PREFIX):
+        message = f"buffers[{buffer_index}].uri must be a glTF data URI"
+        raise ValueError(message)
+
+    buffer_bytes = base64.b64decode(uri[len(_DATA_URI_PREFIX) :])
+    return buffer_bytes[byte_offset : byte_offset + byte_length]
 
 
 class TestGltf(TestCase):
@@ -404,3 +471,275 @@ class TestGltf(TestCase):
         )
 
         self.assertIsNone(result)
+
+    def test_merge_duplicate_vertex_skinning_weights(self) -> None:
+        joints_bytes = struct.pack("<8B", 1, 1, 2, 3, 4, 5, 4, 6)
+        weights_bytes = struct.pack(
+            "<8f",
+            0.2,
+            0.3,
+            0.25,
+            0.25,
+            0.1,
+            0.2,
+            0.3,
+            0.4,
+        )
+        buffer0_bytes = joints_bytes + weights_bytes
+
+        json_dict: dict[str, Json] = {
+            "buffers": [{"byteLength": len(buffer0_bytes)}],
+            "bufferViews": [
+                {"buffer": 0, "byteOffset": 0, "byteLength": len(joints_bytes)},
+                {
+                    "buffer": 0,
+                    "byteOffset": len(joints_bytes),
+                    "byteLength": len(weights_bytes),
+                },
+            ],
+            "accessors": [
+                {
+                    "bufferView": 0,
+                    "componentType": 5121,
+                    "count": 2,
+                    "type": "VEC4",
+                },
+                {
+                    "bufferView": 1,
+                    "componentType": 5126,
+                    "count": 2,
+                    "type": "VEC4",
+                },
+            ],
+            "meshes": [
+                {
+                    "primitives": [
+                        {"attributes": {"JOINTS_0": 0, "WEIGHTS_0": 1}},
+                    ]
+                }
+            ],
+        }
+
+        gltf.merge_duplicate_vertex_skinning_weights(json_dict, buffer0_bytes)
+
+        meshes = _require_json_list(json_dict["meshes"], "meshes")
+        mesh_dict = _require_json_dict(meshes[0], "meshes[0]")
+        primitive_dicts = _require_json_list(mesh_dict["primitives"], "primitives")
+        primitive_dict = _require_json_dict(primitive_dicts[0], "primitives[0]")
+        attributes_dict = _require_json_dict(primitive_dict["attributes"], "attributes")
+
+        joints_accessor_index = _require_json_int(
+            attributes_dict["JOINTS_0"], "attributes.JOINTS_0"
+        )
+        weights_accessor_index = _require_json_int(
+            attributes_dict["WEIGHTS_0"], "attributes.WEIGHTS_0"
+        )
+
+        self.assertEqual(joints_accessor_index, 2)
+        self.assertEqual(weights_accessor_index, 3)
+
+        merged_joints_bytes = _read_accessor_buffer_bytes(
+            json_dict, joints_accessor_index
+        )
+        merged_weights_bytes = _read_accessor_buffer_bytes(
+            json_dict, weights_accessor_index
+        )
+
+        self.assertEqual(
+            struct.unpack("<8H", merged_joints_bytes),
+            (1, 3, 2, 0, 4, 6, 5, 0),
+        )
+        merged_weights = struct.unpack("<8f", merged_weights_bytes)
+        self.assertAlmostEqual(merged_weights[0], 0.5, places=6)
+        self.assertAlmostEqual(merged_weights[1], 0.25, places=6)
+        self.assertAlmostEqual(merged_weights[2], 0.25, places=6)
+        self.assertAlmostEqual(merged_weights[3], 0.0, places=6)
+        self.assertAlmostEqual(merged_weights[4], 0.4, places=6)
+        self.assertAlmostEqual(merged_weights[5], 0.4, places=6)
+        self.assertAlmostEqual(merged_weights[6], 0.2, places=6)
+        self.assertAlmostEqual(merged_weights[7], 0.0, places=6)
+
+    def test_merge_duplicate_vertex_skinning_weights_zero_total_weight(self) -> None:
+        joints_bytes = struct.pack("<4B", 1, 1, 2, 3)
+        weights_bytes = struct.pack("<4f", 0.0, 0.0, 0.0, 0.0)
+        buffer0_bytes = joints_bytes + weights_bytes
+
+        json_dict: dict[str, Json] = {
+            "buffers": [{"byteLength": len(buffer0_bytes)}],
+            "bufferViews": [
+                {"buffer": 0, "byteOffset": 0, "byteLength": len(joints_bytes)},
+                {
+                    "buffer": 0,
+                    "byteOffset": len(joints_bytes),
+                    "byteLength": len(weights_bytes),
+                },
+            ],
+            "accessors": [
+                {
+                    "bufferView": 0,
+                    "componentType": 5121,
+                    "count": 1,
+                    "type": "VEC4",
+                },
+                {
+                    "bufferView": 1,
+                    "componentType": 5126,
+                    "count": 1,
+                    "type": "VEC4",
+                },
+            ],
+            "meshes": [
+                {
+                    "primitives": [
+                        {"attributes": {"JOINTS_0": 0, "WEIGHTS_0": 1}},
+                    ]
+                }
+            ],
+        }
+
+        gltf.merge_duplicate_vertex_skinning_weights(json_dict, buffer0_bytes)
+
+        meshes = _require_json_list(json_dict["meshes"], "meshes")
+        mesh_dict = _require_json_dict(meshes[0], "meshes[0]")
+        primitive_dicts = _require_json_list(mesh_dict["primitives"], "primitives")
+        primitive_dict = _require_json_dict(primitive_dicts[0], "primitives[0]")
+        attributes_dict = _require_json_dict(primitive_dict["attributes"], "attributes")
+        joints_accessor_index = _require_json_int(
+            attributes_dict["JOINTS_0"], "attributes.JOINTS_0"
+        )
+        weights_accessor_index = _require_json_int(
+            attributes_dict["WEIGHTS_0"], "attributes.WEIGHTS_0"
+        )
+
+        self.assertEqual(
+            struct.unpack(
+                "<4H", _read_accessor_buffer_bytes(json_dict, joints_accessor_index)
+            ),
+            (0, 0, 0, 0),
+        )
+        self.assertEqual(
+            struct.unpack(
+                "<4f", _read_accessor_buffer_bytes(json_dict, weights_accessor_index)
+            ),
+            (0.0, 0.0, 0.0, 0.0),
+        )
+
+    def test_merge_duplicate_vertex_skinning_weights_multiple_sets(self) -> None:
+        joints0_bytes = struct.pack("<4B", 1, 2, 3, 4)
+        weights0_bytes = struct.pack("<4B", 25, 25, 25, 25)
+        joints1_bytes = struct.pack("<4B", 1, 5, 6, 7)
+        weights1_bytes = struct.pack("<4B", 50, 25, 25, 25)
+        buffer0_bytes = joints0_bytes + weights0_bytes + joints1_bytes + weights1_bytes
+
+        weights0_offset = len(joints0_bytes)
+        joints1_offset = weights0_offset + len(weights0_bytes)
+        weights1_offset = joints1_offset + len(joints1_bytes)
+
+        json_dict: dict[str, Json] = {
+            "buffers": [{"byteLength": len(buffer0_bytes)}],
+            "bufferViews": [
+                {"buffer": 0, "byteOffset": 0, "byteLength": len(joints0_bytes)},
+                {
+                    "buffer": 0,
+                    "byteOffset": weights0_offset,
+                    "byteLength": len(weights0_bytes),
+                },
+                {
+                    "buffer": 0,
+                    "byteOffset": joints1_offset,
+                    "byteLength": len(joints1_bytes),
+                },
+                {
+                    "buffer": 0,
+                    "byteOffset": weights1_offset,
+                    "byteLength": len(weights1_bytes),
+                },
+            ],
+            "accessors": [
+                {
+                    "bufferView": 0,
+                    "componentType": 5121,
+                    "count": 1,
+                    "type": "VEC4",
+                },
+                {
+                    "bufferView": 1,
+                    "componentType": 5121,
+                    "count": 1,
+                    "normalized": True,
+                    "type": "VEC4",
+                },
+                {
+                    "bufferView": 2,
+                    "componentType": 5121,
+                    "count": 1,
+                    "type": "VEC4",
+                },
+                {
+                    "bufferView": 3,
+                    "componentType": 5121,
+                    "count": 1,
+                    "normalized": True,
+                    "type": "VEC4",
+                },
+            ],
+            "meshes": [
+                {
+                    "primitives": [
+                        {
+                            "attributes": {
+                                "JOINTS_0": 0,
+                                "WEIGHTS_0": 1,
+                                "JOINTS_1": 2,
+                                "WEIGHTS_1": 3,
+                            }
+                        },
+                    ]
+                }
+            ],
+        }
+
+        gltf.merge_duplicate_vertex_skinning_weights(json_dict, buffer0_bytes)
+
+        meshes = _require_json_list(json_dict["meshes"], "meshes")
+        mesh_dict = _require_json_dict(meshes[0], "meshes[0]")
+        primitive_dicts = _require_json_list(mesh_dict["primitives"], "primitives")
+        primitive_dict = _require_json_dict(primitive_dicts[0], "primitives[0]")
+        attributes_dict = _require_json_dict(primitive_dict["attributes"], "attributes")
+
+        joints0_accessor_index = _require_json_int(
+            attributes_dict["JOINTS_0"], "attributes.JOINTS_0"
+        )
+        weights0_accessor_index = _require_json_int(
+            attributes_dict["WEIGHTS_0"], "attributes.WEIGHTS_0"
+        )
+        joints1_accessor_index = _require_json_int(
+            attributes_dict["JOINTS_1"], "attributes.JOINTS_1"
+        )
+        weights1_accessor_index = _require_json_int(
+            attributes_dict["WEIGHTS_1"], "attributes.WEIGHTS_1"
+        )
+
+        self.assertEqual(
+            struct.unpack(
+                "<4H", _read_accessor_buffer_bytes(json_dict, joints0_accessor_index)
+            ),
+            (1, 7, 6, 5),
+        )
+        self.assertEqual(
+            struct.unpack(
+                "<4H", _read_accessor_buffer_bytes(json_dict, joints1_accessor_index)
+            ),
+            (4, 3, 2, 0),
+        )
+
+        weights0 = struct.unpack(
+            "<4f", _read_accessor_buffer_bytes(json_dict, weights0_accessor_index)
+        )
+        weights1 = struct.unpack(
+            "<4f", _read_accessor_buffer_bytes(json_dict, weights1_accessor_index)
+        )
+        for actual, expected in zip(weights0, (1 / 3, 1 / 9, 1 / 9, 1 / 9)):
+            self.assertAlmostEqual(actual, expected, places=6)
+        for actual, expected in zip(weights1, (1 / 9, 1 / 9, 1 / 9, 0.0)):
+            self.assertAlmostEqual(actual, expected, places=6)

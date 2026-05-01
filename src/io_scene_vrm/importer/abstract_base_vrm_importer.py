@@ -43,6 +43,7 @@ from ..common.gl import GL_FLOAT, GL_LINEAR, GL_REPEAT, GL_UNSIGNED_SHORT
 from ..common.gltf import (
     FLOAT_NEGATIVE_MAX,
     FLOAT_POSITIVE_MAX,
+    merge_duplicate_vertex_skinning_weights,
     pack_glb,
     parse_glb,
     read_buffer_view_as_bytes,
@@ -1043,6 +1044,8 @@ class AbstractBaseVrmImporter(ABC):
                                 if min_value > 0
                                 else FLOAT_NEGATIVE_MAX
                             )
+
+        merge_duplicate_vertex_skinning_weights(json_dict, buffer0_bytes)
 
         if self._parse_result.spec_version_number < (1, 0):
             bone_heuristic = "FORTUNE"

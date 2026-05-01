@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT OR GPL-3.0-or-later
 import base64
 import json
+import math
 import struct
 from dataclasses import dataclass
 from io import BytesIO
@@ -462,6 +463,258 @@ def _unpack_component(
         f"<{unpack_count}{component.unpack_symbol}",
         buffer_bytes[:unpack_byte_length],
     )
+
+
+def _merge_duplicate_primitive_vertex_skinning_weights(
+    accessor_dicts: list[Json],
+    buffer_view_dicts: list[Json],
+    buffer_dicts: list[Json],
+    buffer0_bytes: bytes,
+    primitive_dict: dict[str, Json],
+) -> None:
+    attributes_dict = primitive_dict.get("attributes")
+    if not isinstance(attributes_dict, dict):
+        return
+
+    joints_and_weights: list[
+        tuple[
+            list[tuple[int, int, int, int]],
+            list[tuple[float, float, float, float]],
+        ]
+    ] = []
+
+    joints_weights_index = 0
+    while True:
+        joints_index = attributes_dict.get(f"JOINTS_{joints_weights_index}")
+        if joints_index is None:
+            break
+        if not isinstance(joints_index, int):
+            return
+        if not (0 <= joints_index < len(accessor_dicts)):
+            return
+        joints_accessor_dict = accessor_dicts[joints_index]
+        if not isinstance(joints_accessor_dict, dict):
+            return
+        if not isinstance(
+            joints_component_type := joints_accessor_dict.get("componentType"), int
+        ):
+            return
+        if joints_component_type not in (GL_UNSIGNED_BYTE, GL_UNSIGNED_SHORT):
+            return
+        joints_n = _read_vec4_accessor(
+            joints_accessor_dict,
+            buffer_view_dicts,
+            buffer_dicts,
+            buffer0_bytes,
+        )
+        if joints_n is None:
+            return
+        joints_n = [(int(j0), int(j1), int(j2), int(j3)) for j0, j1, j2, j3 in joints_n]
+
+        weights_index = attributes_dict.get(f"WEIGHTS_{joints_weights_index}")
+        if not isinstance(weights_index, int):
+            return
+        if not (0 <= weights_index < len(accessor_dicts)):
+            return
+        weights_accessor_dict = accessor_dicts[weights_index]
+        if not isinstance(weights_accessor_dict, dict):
+            return
+        if not isinstance(
+            weights_component_type := weights_accessor_dict.get("componentType"), int
+        ):
+            return
+        weights_n = _read_vec4_accessor(
+            weights_accessor_dict,
+            buffer_view_dicts,
+            buffer_dicts,
+            buffer0_bytes,
+        )
+        if weights_n is None:
+            return
+        if len(joints_n) != len(weights_n):
+            return
+        if weights_component_type == GL_FLOAT:
+            denominator = 1.0
+        elif weights_component_type == GL_UNSIGNED_BYTE:
+            denominator = 255.0
+        elif weights_component_type == GL_UNSIGNED_SHORT:
+            denominator = 65535.0
+        else:
+            return
+        weights_n = [
+            (
+                max(0.0, min((0.0 if math.isnan(w0) else w0) / denominator, 1.0)),
+                max(0.0, min((0.0 if math.isnan(w1) else w1) / denominator, 1.0)),
+                max(0.0, min((0.0 if math.isnan(w2) else w2) / denominator, 1.0)),
+                max(0.0, min((0.0 if math.isnan(w3) else w3) / denominator, 1.0)),
+            )
+            for w0, w1, w2, w3 in weights_n
+        ]
+
+        joints_and_weights.append((joints_n, weights_n))
+        joints_weights_index += 1
+
+    if not joints_and_weights:
+        return
+
+    have_joint_duplication = False
+    vertex_index = 0
+    all_vertices_processed = False
+    while not all_vertices_processed:
+        joint_to_weight_by_vertex_dict: dict[int, float] = {}
+        need_writeback_in_this_loop = False
+        for joints_n, weights_n in joints_and_weights:
+            if vertex_index >= len(joints_n) or vertex_index >= len(weights_n):
+                all_vertices_processed = True
+                break
+            joint_n = joints_n[vertex_index]
+            weight_n = weights_n[vertex_index]
+            for joint, weight in zip(joint_n, weight_n):
+                if joint == 0 and not (weight > 0):
+                    continue
+                if joint in joint_to_weight_by_vertex_dict:
+                    joint_to_weight_by_vertex_dict[joint] += weight
+                    have_joint_duplication = True
+                    need_writeback_in_this_loop = True
+                else:
+                    joint_to_weight_by_vertex_dict[joint] = weight
+
+        if need_writeback_in_this_loop:
+            joint_to_weight_by_vertex: list[tuple[int, float]] = sorted(
+                joint_to_weight_by_vertex_dict.items(),
+                key=lambda item: (item[1], item[0]),
+                reverse=True,
+            )
+            denominator = sum(weight for _joint, weight in joint_to_weight_by_vertex)
+            if not (denominator > 0):
+                denominator = 1
+                joint_to_weight_by_vertex = []
+            for joints_n, weights_n in joints_and_weights:
+                (j0, w0), (j1, w1), (j2, w2), (j3, w3) = (
+                    joint_to_weight_by_vertex.pop(0)
+                    if joint_to_weight_by_vertex
+                    else (0, 0.0),
+                    joint_to_weight_by_vertex.pop(0)
+                    if joint_to_weight_by_vertex
+                    else (0, 0.0),
+                    joint_to_weight_by_vertex.pop(0)
+                    if joint_to_weight_by_vertex
+                    else (0, 0.0),
+                    joint_to_weight_by_vertex.pop(0)
+                    if joint_to_weight_by_vertex
+                    else (0, 0.0),
+                )
+                joints_n[vertex_index] = (j0, j1, j2, j3)
+                weights_n[vertex_index] = (
+                    w0 / denominator,
+                    w1 / denominator,
+                    w2 / denominator,
+                    w3 / denominator,
+                )
+
+        vertex_index += 1
+
+    if not have_joint_duplication:
+        return
+
+    for index, (joints_n, weights_n) in enumerate(joints_and_weights):
+        joints_n_bytearray = bytearray()
+        for j in joints_n:
+            joints_n_bytearray.extend(struct.pack("<4H", *j))
+
+        joints_buffer_index = len(buffer_dicts)
+        buffer_dicts.append(
+            {
+                "uri": "data:application/gltf-buffer;base64,"
+                + base64.b64encode(joints_n_bytearray).decode("ascii"),
+                "byteLength": len(joints_n_bytearray),
+            }
+        )
+
+        joints_buffer_view_dict: Json = {
+            "buffer": joints_buffer_index,
+            "byteLength": len(joints_n_bytearray),
+        }
+        joints_buffer_view_index = len(buffer_view_dicts)
+        buffer_view_dicts.append(joints_buffer_view_dict)
+        joints_accessor_dict: Json = {
+            "bufferView": joints_buffer_view_index,
+            "byteOffset": 0,
+            "componentType": GL_UNSIGNED_SHORT,
+            "count": len(joints_n),
+            "type": "VEC4",
+        }
+        joints_accessor_index = len(accessor_dicts)
+        accessor_dicts.append(joints_accessor_dict)
+        attributes_dict[f"JOINTS_{index}"] = joints_accessor_index
+
+        weights_n_bytearray = bytearray()
+        for w in weights_n:
+            weights_n_bytearray.extend(struct.pack("<4f", *w))
+
+        weights_buffer_index = len(buffer_dicts)
+        buffer_dicts.append(
+            {
+                "uri": "data:application/gltf-buffer;base64,"
+                + base64.b64encode(weights_n_bytearray).decode("ascii"),
+                "byteLength": len(weights_n_bytearray),
+            }
+        )
+
+        weights_buffer_view_dict: Json = {
+            "buffer": weights_buffer_index,
+            "byteLength": len(weights_n_bytearray),
+        }
+        weights_buffer_view_index = len(buffer_view_dicts)
+        buffer_view_dicts.append(weights_buffer_view_dict)
+        weights_accessor_dict: Json = {
+            "bufferView": weights_buffer_view_index,
+            "byteOffset": 0,
+            "componentType": GL_FLOAT,
+            "count": len(weights_n),
+            "type": "VEC4",
+        }
+
+        weights_accessor_index = len(accessor_dicts)
+        accessor_dicts.append(weights_accessor_dict)
+        attributes_dict[f"WEIGHTS_{index}"] = weights_accessor_index
+
+
+def merge_duplicate_vertex_skinning_weights(
+    json_dict: dict[str, Json],
+    buffer0_bytes: bytes,
+) -> None:
+    """Merge duplicated vertex skinning weights in the glTF.
+
+    Some VRM models may contain multiple skinning weights for a single joint
+    on a single vertex. Since this violates the glTF specification, we merge
+    and fix these duplicates before passing them to the official glTF importer.
+    """
+    if not isinstance(accessor_dicts := json_dict.get("accessors"), list):
+        return
+    if not isinstance(buffer_view_dicts := json_dict.get("bufferViews"), list):
+        return
+    if not isinstance(buffer_dicts := json_dict.get("buffers"), list):
+        return
+    if not isinstance(mesh_dicts := json_dict.get("meshes"), list):
+        return
+
+    for mesh_dict in mesh_dicts:
+        if not isinstance(mesh_dict, dict):
+            continue
+        if not isinstance(primitive_dicts := mesh_dict.get("primitives"), list):
+            continue
+
+        for primitive_dict in primitive_dicts:
+            if not isinstance(primitive_dict, dict):
+                continue
+            _merge_duplicate_primitive_vertex_skinning_weights(
+                accessor_dicts,
+                buffer_view_dicts,
+                buffer_dicts,
+                buffer0_bytes,
+                primitive_dict,
+            )
 
 
 def _unpack_accessor_as_scalar_components(
