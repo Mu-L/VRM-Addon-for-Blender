@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: MIT OR GPL-3.0-or-later
 
 import functools
-import sys
 from os import environ
 from pathlib import Path
 from unittest import main
@@ -93,7 +92,6 @@ class __TestImportSceneBrokenVrmBase(AddonTestCase):
         success = True
         if (
             vrm_path.name == "draco.vrm"
-            and (sys.platform in ("linux", "win32"))
             and not bpy.app.binary_path
             and bpy.app.version < (4, 5)
         ):
