@@ -64,11 +64,15 @@
       "write": true
     },
     "update-changelog": {
-      "env": [
-        "GITHUB_TOKEN",
-        "GH_TOKEN",
-        "IGNORE_TEST_WIN32"
-      ],
+      "env": {
+        "allow": [
+          "GITHUB_TOKEN",
+          "GH_TOKEN"
+        ],
+        "ignore": [
+          "IGNORE_TEST_WIN32"
+        ]
+      },
       "net": [
         "api.github.com:443"
       ],
