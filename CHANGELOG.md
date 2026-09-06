@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.7.1](https://github.com/saturday06/VRM-Addon-for-Blender/compare/v4.7.0...v4.7.1) (2026-09-06)
+
+
+### 🐛 Bug Fixes
+
+* fix VRMA hips translation for transformed armatures ([9c76f6c](https://github.com/saturday06/VRM-Addon-for-Blender/commit/9c76f6c969f4f39875cfee6b6d99897c06937160))
+
 ## [4.7.0](https://github.com/saturday06/VRM-Addon-for-Blender/compare/v4.6.0...v4.7.0) (2026-09-05)
 
 
